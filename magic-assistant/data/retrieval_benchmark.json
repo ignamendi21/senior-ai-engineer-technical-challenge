@@ -1,0 +1,72 @@
+[
+  {
+    "query": "What are the phases of a turn?",
+    "expected_rule_ids": ["500", "500.1"],
+    "language": "en"
+  },
+  {
+    "query": "¿Cuántas fases tiene un turno?",
+    "expected_rule_ids": ["500", "500.1"],
+    "language": "es"
+  },
+  {
+    "query": "How does first strike work?",
+    "expected_rule_ids": ["702.7", "510"],
+    "language": "en"
+  },
+  {
+    "query": "¿Cómo funciona dañar primero?",
+    "expected_rule_ids": ["702.7", "510"],
+    "language": "es"
+  },
+  {
+    "query": "How does ninjutsu work?",
+    "expected_rule_ids": ["702.49"],
+    "language": "en"
+  },
+  {
+    "query": "¿Cómo funciona ninjutsu?",
+    "expected_rule_ids": ["702.49"],
+    "language": "es"
+  },
+  {
+    "query": "What is the combat damage step?",
+    "expected_rule_ids": ["510"],
+    "language": "en"
+  },
+  {
+    "query": "What does rule 509.1h mean?",
+    "expected_rule_ids": ["509.1h"],
+    "language": "en"
+  },
+  {
+    "query": "How does trample damage work?",
+    "expected_rule_ids": ["702.19"],
+    "language": "en"
+  },
+  {
+    "query": "¿Qué hace toque mortal?",
+    "expected_rule_ids": ["702.2"],
+    "language": "es"
+  },
+  {
+    "query": "How do I take a mulligan?",
+    "expected_rule_ids": ["103.5"],
+    "language": "en"
+  },
+  {
+    "query": "¿Cómo funciona el vínculo vital?",
+    "expected_rule_ids": ["702.15"],
+    "language": "es"
+  },
+  {
+    "query": "How is a commander's color identity determined?",
+    "expected_rule_ids": ["903.4"],
+    "language": "en"
+  },
+  {
+    "query": "When does a player receive priority?",
+    "expected_rule_ids": ["117.3"],
+    "language": "en"
+  }
+]
