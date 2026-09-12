@@ -13,3 +13,4 @@ htmlcov/
 !.env.example
 
 magic-assistant/data/*.pdf
+magic-assistant/data/index/
