@@ -13,6 +13,7 @@ DEFAULT_MAX_CHARS = 3_000
 class RuleChunk(BaseModel):
     chunk_id: str
     rule_ids: list[str] = Field(default_factory=list)
+    root_rule_id: str | None = None
     parent_rule_id: str | None = None
     chapter_id: str | None = None
     chapter_title: str | None = None
@@ -132,6 +133,7 @@ class RulesChunker:
         return RuleChunk(
             chunk_id=f"rule:{group_root.rule_id}:{index}",
             rule_ids=[rule.rule_id for rule in partition],
+            root_rule_id=group_root.rule_id,
             parent_rule_id=partition[0].parent_rule_id,
             chapter_id=group_root.chapter_id,
             chapter_title=group_root.chapter_title,

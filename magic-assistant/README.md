@@ -77,11 +77,11 @@ The parser is intentionally specific to the known Comprehensive Rules format:
 5. The glossary is detected by its heading and parsed into separate `GlossaryDocument` records; PDF font metadata distinguishes terms from definitions.
 6. Explicit `rule`/`rules` citations and section references are retained as relationships; bare quantities are not treated as citations.
 
-All records carry `rules_version="2026-04-17"`. Section headings are represented as rule records because identifiers such as `702` are valid citation and hierarchy anchors.
+`parse_pdf` detects the effective-date statement in the front matter and normalizes it to the ISO `rules_version` stored on every record; parsing fails if that provenance is missing. Text fixtures default to `2026-04-17` and may supply an explicit version. Section headings are represented as rule records because identifiers such as `702` are valid citation and hierarchy anchors.
 
 ## Structure-aware chunking
 
-`RulesChunker` groups a numbered parent rule with its lettered subrules. A group is emitted intact when it fits the configured maximum. Large groups are partitioned only between records, never in the middle of a rule or subrule. Any oversized atomic record remains intact, making `max_chars` a soft limit in that exceptional case. Glossary entries each form one semantic chunk.
+`RulesChunker` groups a numbered parent rule with its lettered subrules. Every partition retains a stable `root_rule_id` for that semantic group, while `parent_rule_id` describes the first record's immediate hierarchy. A group is emitted intact when it fits the configured maximum. Large groups are partitioned only between records, never in the middle of a rule or subrule. Any oversized atomic record remains intact, making `max_chars` a soft limit in that exceptional case. Glossary entries each form one semantic chunk.
 
 The default is **3,000 characters**. Measurements from the supplied 309-page PDF were:
 

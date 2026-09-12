@@ -36,6 +36,24 @@ Credits
     return ComprehensiveRulesParser().parse_pages(pages)
 
 
+def write_complete_rules_pdf(path: Path, effective_date: str | None = None) -> None:
+    with pymupdf.open() as document:
+        if effective_date:
+            front_matter = document.new_page()
+            front_matter.insert_text((72, 72), f"These rules are effective as of {effective_date}.")
+        rules_page = document.new_page()
+        rules_page.insert_text((72, 72), "1. Game Concepts", fontname="hebo")
+        rules_page.insert_text((90, 90), "100. General")
+        rules_page.insert_text((105, 108), "100.1. A representative rule.")
+        rules_page.insert_text((72, 126), "9. Casual Variants", fontname="hebo")
+        rules_page.insert_text((90, 144), "900. General")
+        rules_page.insert_text((72, 162), "Glossary", fontname="hebo")
+        rules_page.insert_text((72, 180), "Representative Term", fontname="hebo")
+        rules_page.insert_text((72, 198), "A representative definition.")
+        rules_page.insert_text((72, 216), "Credits", fontname="hebo")
+        document.save(path)
+
+
 def test_parses_basic_numbered_rule(parsed_rules):
     rule = parsed_rules.find_rule("702.49")
 
@@ -95,6 +113,31 @@ def test_applies_rules_version_to_every_document(parsed_rules):
     assert {document.rules_version for document in documents} == {RULES_VERSION}
 
 
+def test_extracts_and_normalizes_effective_date():
+    text = "These rules are effective as of April 17, 2026."
+
+    assert ComprehensiveRulesParser.extract_rules_version(text) == "2026-04-17"
+
+
+def test_parse_pdf_applies_detected_version(tmp_path):
+    pdf_path = tmp_path / "rules.pdf"
+    write_complete_rules_pdf(pdf_path, effective_date="May 2, 2027")
+
+    parsed = ComprehensiveRulesParser().parse_pdf(pdf_path)
+
+    assert {document.rules_version for document in [*parsed.rules, *parsed.glossary]} == {
+        "2027-05-02"
+    }
+
+
+def test_complete_pdf_without_effective_date_is_rejected(tmp_path):
+    pdf_path = tmp_path / "rules-without-date.pdf"
+    write_complete_rules_pdf(pdf_path)
+
+    with pytest.raises(RulesParseError, match="Could not find the rules effective date"):
+        ComprehensiveRulesParser().parse_pdf(pdf_path)
+
+
 def test_missing_pdf_has_useful_error(tmp_path):
     missing_path = tmp_path / "missing.pdf"
 
@@ -125,6 +168,9 @@ def test_real_pdf_smoke_when_available():
     assert len({rule.rule_id for rule in parsed.rules}) == len(parsed.rules)
     assert len(parsed.glossary) == 730
     assert all(entry.definition for entry in parsed.glossary)
+    assert {document.rules_version for document in [*parsed.rules, *parsed.glossary]} == {
+        "2026-04-17"
+    }
     assert parsed.find_rule("702.49").title == "Ninjutsu"
     assert next(
         entry for entry in parsed.glossary if entry.term == "Ninjutsu"

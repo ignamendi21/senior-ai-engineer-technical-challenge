@@ -1,6 +1,7 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import pymupdf
@@ -11,7 +12,11 @@ RULES_VERSION = "2026-04-17"
 _SECTION_MAX_INDENT = 100
 _PARENT_RULE_MAX_INDENT = 115
 _SUBRULE_MAX_INDENT = 130
+_FRONT_MATTER_PAGE_LIMIT = 5
 
+_EFFECTIVE_DATE_RE = re.compile(
+    r"These rules are effective as of (?P<date>[A-Z][a-z]+ \d{1,2}, \d{4})\."
+)
 _CHAPTER_RE = re.compile(r"^(?P<id>[1-9])\.\s+(?P<title>\S.*)$")
 _SECTION_RE = re.compile(r"^(?P<id>\d{3})\.\s+(?P<title>\S.*)$")
 _RULE_RE = re.compile(r"^(?P<id>\d{3}(?:\.\d+)+[a-z]?)\.?\s+(?P<text>\S.*)$")
@@ -69,9 +74,20 @@ class ComprehensiveRulesParser:
         except pymupdf.FileDataError as error:
             raise RulesParseError(f"Could not read rules PDF: {path}") from error
 
-        return self._parse_extracted_pages(pages, require_complete_document=True)
+        front_matter = "\n".join(
+            line.text for page in pages[:_FRONT_MATTER_PAGE_LIMIT] for line in page
+        )
+        detected_version = self.extract_rules_version(front_matter)
+        parsed = self._parse_extracted_pages(
+            pages,
+            require_complete_document=True,
+            rules_version=detected_version or RULES_VERSION,
+        )
+        if detected_version is None:
+            raise RulesParseError("Could not find the rules effective date in the PDF front matter")
+        return parsed
 
-    def parse_pages(self, pages: Sequence[str]) -> ParsedRules:
+    def parse_pages(self, pages: Sequence[str], rules_version: str = RULES_VERSION) -> ParsedRules:
         extracted_pages = [
             [
                 _ExtractedLine(text=line.strip(), page=page_number)
@@ -80,7 +96,11 @@ class ComprehensiveRulesParser:
             ]
             for page_number, page in enumerate(pages, 1)
         ]
-        return self._parse_extracted_pages(extracted_pages, require_complete_document=False)
+        return self._parse_extracted_pages(
+            extracted_pages,
+            require_complete_document=False,
+            rules_version=rules_version,
+        )
 
     @staticmethod
     def _extract_pdf_page(page: pymupdf.Page, page_number: int) -> list[_ExtractedLine]:
@@ -105,6 +125,7 @@ class ComprehensiveRulesParser:
         pages: Sequence[Sequence[_ExtractedLine]],
         *,
         require_complete_document: bool,
+        rules_version: str,
     ) -> ParsedRules:
         first_rules_page = self._find_first_rules_page(pages)
         if first_rules_page is None:
@@ -125,12 +146,12 @@ class ComprehensiveRulesParser:
             for index, line in enumerate(page):
                 if line.text == "Credits":
                     if current_glossary:
-                        glossary.append(self._build_glossary(current_glossary))
+                        glossary.append(self._build_glossary(current_glossary, rules_version))
                     return self._finish_parsing(rules, glossary, require_complete_document)
 
                 if line.text == "Glossary":
                     if current_rule:
-                        rules.append(self._build_rule(current_rule))
+                        rules.append(self._build_rule(current_rule, rules_version))
                         current_rule = None
                     in_glossary = True
                     continue
@@ -139,7 +160,7 @@ class ComprehensiveRulesParser:
                     next_text = page[index + 1].text if index + 1 < len(page) else None
                     if self._is_glossary_term(line, next_text):
                         if current_glossary:
-                            glossary.append(self._build_glossary(current_glossary))
+                            glossary.append(self._build_glossary(current_glossary, rules_version))
                         current_glossary = _GlossaryBuilder(
                             term=line.text,
                             page_start=line.page,
@@ -153,7 +174,7 @@ class ComprehensiveRulesParser:
                 chapter_match = _CHAPTER_RE.fullmatch(line.text)
                 if chapter_match and line.is_bold is not False:
                     if current_rule:
-                        rules.append(self._build_rule(current_rule))
+                        rules.append(self._build_rule(current_rule, rules_version))
                         current_rule = None
                     chapter_id = chapter_match["id"]
                     chapter_title = chapter_match["title"]
@@ -168,7 +189,7 @@ class ComprehensiveRulesParser:
                     and (line.indent is None or line.indent < _SECTION_MAX_INDENT)
                 ):
                     if current_rule:
-                        rules.append(self._build_rule(current_rule))
+                        rules.append(self._build_rule(current_rule, rules_version))
                     section_id = section_match["id"]
                     section_title = section_match["title"]
                     current_rule = _RuleBuilder(
@@ -188,7 +209,7 @@ class ComprehensiveRulesParser:
                 rule_match = _RULE_RE.fullmatch(line.text)
                 if rule_match and self._is_rule_start(rule_match["id"], line.indent):
                     if current_rule:
-                        rules.append(self._build_rule(current_rule))
+                        rules.append(self._build_rule(current_rule, rules_version))
                     rule_id = rule_match["id"]
                     body = rule_match["text"] or ""
                     current_rule = _RuleBuilder(
@@ -210,9 +231,9 @@ class ComprehensiveRulesParser:
                     current_rule.page_end = line.page
 
         if current_rule:
-            rules.append(self._build_rule(current_rule))
+            rules.append(self._build_rule(current_rule, rules_version))
         if current_glossary:
-            glossary.append(self._build_glossary(current_glossary))
+            glossary.append(self._build_glossary(current_glossary, rules_version))
         return self._finish_parsing(rules, glossary, require_complete_document)
 
     @staticmethod
@@ -284,7 +305,7 @@ class ComprehensiveRulesParser:
             for word in words
         )
 
-    def _build_rule(self, builder: _RuleBuilder) -> RuleDocument:
+    def _build_rule(self, builder: _RuleBuilder, rules_version: str) -> RuleDocument:
         text = self._join_rule_lines(builder.lines)
         return RuleDocument(
             rule_id=builder.rule_id,
@@ -297,11 +318,11 @@ class ComprehensiveRulesParser:
             text=text,
             page_start=builder.page_start,
             page_end=builder.page_end,
-            rules_version=RULES_VERSION,
+            rules_version=rules_version,
             related_rule_ids=self.extract_references(text, exclude={builder.rule_id}),
         )
 
-    def _build_glossary(self, builder: _GlossaryBuilder) -> GlossaryDocument:
+    def _build_glossary(self, builder: _GlossaryBuilder, rules_version: str) -> GlossaryDocument:
         definition = " ".join(builder.lines).strip()
         return GlossaryDocument(
             term=builder.term,
@@ -309,7 +330,7 @@ class ComprehensiveRulesParser:
             related_rule_ids=self.extract_references(definition),
             page_start=builder.page_start,
             page_end=builder.page_end,
-            rules_version=RULES_VERSION,
+            rules_version=rules_version,
         )
 
     @staticmethod
@@ -319,6 +340,16 @@ class ComprehensiveRulesParser:
             separator = "\n" if line.startswith("Example:") and result else " " if result else ""
             result += separator + line
         return result
+
+    @staticmethod
+    def extract_rules_version(text: str) -> str | None:
+        match = _EFFECTIVE_DATE_RE.search(text)
+        if match is None:
+            return None
+        try:
+            return datetime.strptime(match["date"], "%B %d, %Y").date().isoformat()
+        except ValueError as error:
+            raise RulesParseError(f"Invalid rules effective date: {match['date']}") from error
 
     @staticmethod
     def extract_references(text: str, exclude: set[str] | None = None) -> list[str]:

@@ -61,6 +61,7 @@ def test_large_group_splits_only_at_subrule_boundaries():
         for chunk in chunks
         if rule.rule_id in chunk.rule_ids
     )
+    assert {chunk.root_rule_id for chunk in chunks} == {"702.49"}
     assert chunks[0].parent_rule_id == "702"
     assert chunks[-1].parent_rule_id == "702.49"
 
@@ -77,6 +78,7 @@ def test_single_oversized_subrule_is_not_split_mid_text():
 def test_metadata_survives_chunking():
     chunk = RulesChunker(max_chars=500).chunk_rules(ninjutsu_group())[0]
 
+    assert chunk.root_rule_id == "702.49"
     assert chunk.parent_rule_id == "702"
     assert chunk.chapter_id == "7"
     assert chunk.chapter_title == "Additional Rules"
@@ -103,6 +105,7 @@ def test_glossary_entry_becomes_its_own_semantic_chunk():
     chunks = RulesChunker().chunk(ParsedRules(glossary=[glossary]))
 
     assert len(chunks) == 1
+    assert chunks[0].root_rule_id is None
     assert chunks[0].term == "Ninjutsu"
     assert chunks[0].text.startswith("Ninjutsu\n")
     assert chunks[0].related_rule_ids == ["702.49"]
