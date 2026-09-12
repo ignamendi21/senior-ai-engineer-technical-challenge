@@ -1,7 +1,7 @@
 [project]
 name = "magic-assistant"
 version = "0.1.0"
-description = "Structure-aware ingestion for the Magic Comprehensive Rules"
+description = "Deterministic Magic rules retrieval and card data access"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [

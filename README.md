@@ -8,10 +8,12 @@ This repository contains a Senior AI Engineer technical challenge organized into
 
 ## Current status
 
-Only Phase 1 of Part 1 is implemented. It provides a tested, structure-aware ingestion layer for the Magic: The Gathering Comprehensive Rules PDF.
+Phases 1 and 2 of Part 1 are implemented:
 
-- [`magic-assistant/`](magic-assistant/) contains the Phase 1 implementation.
-- [`code-review/`](code-review/) is a placeholder for Part 2.
-- [`solution-design/`](solution-design/) is a placeholder for Part 3.
+- Structure-aware Comprehensive Rules ingestion
+- Hybrid multilingual rules retrieval
+- Deterministic Magic card API access
 
-No chatbot, LLM integration, retrieval system, API, UI, or implementation for Parts 2 and 3 is included at this stage. Engineering decisions are recorded in [`decisions.md`](decisions.md).
+[`magic-assistant/`](magic-assistant/) contains the implementation. [`code-review/`](code-review/) and [`solution-design/`](solution-design/) remain placeholders.
+
+No LLM, agent orchestration, chatbot, web API, UI, or implementation for Parts 2 and 3 is included. Engineering decisions are recorded in [`decisions.md`](decisions.md).
