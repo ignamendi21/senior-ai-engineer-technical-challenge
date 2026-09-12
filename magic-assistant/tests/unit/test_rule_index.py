@@ -117,6 +117,43 @@ def test_rejects_incompatible_model(tmp_path):
         )
 
 
+def test_rejects_incompatible_rules_version(tmp_path):
+    chunks = [make_chunk("702.49", "Ninjutsu")]
+    index = DenseRuleIndex.build(chunks, FakeEmbeddingProvider())
+    index.save(tmp_path)
+    changed_manifest = index.manifest.model_copy(update={"rules_version": "2027-01-01"})
+    (tmp_path / "manifest.json").write_text(changed_manifest.model_dump_json(), encoding="utf-8")
+
+    with pytest.raises(RuleIndexError, match="rules version"):
+        DenseRuleIndex.load(
+            tmp_path,
+            expected_chunks=chunks,
+            expected_model="fake-embeddings",
+        )
+
+
+def test_rejects_corrupted_embedding_matrix(tmp_path):
+    chunks = [make_chunk("702.7", "First strike"), make_chunk("702.49", "Ninjutsu")]
+    index = DenseRuleIndex.build(chunks, FakeEmbeddingProvider())
+    index.save(tmp_path)
+    np.save(tmp_path / "embeddings.npy", index.embeddings[::-1], allow_pickle=False)
+
+    with pytest.raises(RuleIndexError, match="does not match the index manifest"):
+        DenseRuleIndex.load(
+            tmp_path,
+            expected_chunks=chunks,
+            expected_model="fake-embeddings",
+        )
+
+
+def test_rejects_non_finite_document_embeddings():
+    provider = FakeEmbeddingProvider()
+    provider.encode_documents = lambda texts: np.asarray([[np.nan, 1.0]], dtype=np.float32)
+
+    with pytest.raises(RuleIndexError, match="finite"):
+        DenseRuleIndex.build([make_chunk("702.49", "Ninjutsu")], provider)
+
+
 def test_fingerprint_is_deterministic_and_metadata_sensitive():
     chunk = make_chunk("702.49", "Ninjutsu")
     same = make_chunk("702.49", "Ninjutsu")

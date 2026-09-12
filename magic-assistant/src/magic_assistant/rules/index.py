@@ -16,7 +16,7 @@ from magic_assistant.rules.embeddings import (
 )
 from magic_assistant.rules.parser import ComprehensiveRulesParser
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 DEFAULT_INDEX_DIRECTORY = Path("data/index")
 DEFAULT_PDF_PATH = Path("data/MagicCompRules 20260417.pdf")
 
@@ -32,6 +32,7 @@ class RuleIndexManifest(BaseModel):
     chunk_count: int
     embedding_dimension: int
     corpus_fingerprint: str
+    embeddings_fingerprint: str
 
 
 class DenseRuleIndex:
@@ -65,6 +66,7 @@ class DenseRuleIndex:
             chunk_count=len(chunks),
             embedding_dimension=embeddings.shape[1],
             corpus_fingerprint=corpus_fingerprint(chunks),
+            embeddings_fingerprint=embeddings_fingerprint(embeddings),
         )
         return cls(chunks, embeddings, manifest)
 
@@ -107,6 +109,8 @@ class DenseRuleIndex:
             raise RuleIndexError(f"Could not load rule index from {directory}") from error
 
         expected_fingerprint = corpus_fingerprint(expected_chunks)
+        expected_versions = {chunk.rules_version for chunk in expected_chunks}
+        persisted_versions = {chunk.rules_version for chunk in persisted_chunks}
         mismatches = []
         if manifest.schema_version != INDEX_SCHEMA_VERSION:
             mismatches.append("schema version")
@@ -116,6 +120,10 @@ class DenseRuleIndex:
             mismatches.append("corpus fingerprint")
         if manifest.chunk_count != len(expected_chunks):
             mismatches.append("chunk count")
+        if expected_versions != {manifest.rules_version}:
+            mismatches.append("rules version")
+        if persisted_versions != {manifest.rules_version}:
+            mismatches.append("persisted chunk versions")
         if mismatches:
             raise RuleIndexError(
                 f"Stale or incompatible rule index ({', '.join(mismatches)}); rebuild explicitly"
@@ -129,6 +137,9 @@ class DenseRuleIndex:
                 f"Embedding matrix shape {actual_shape} does not match manifest {expected_shape}"
             )
             raise RuleIndexError(message)
+        if embeddings_fingerprint(embeddings) != manifest.embeddings_fingerprint:
+            raise RuleIndexError("Embedding matrix does not match the index manifest")
+        cls._validate_normalized_matrix(embeddings)
         return cls(persisted_chunks, embeddings, manifest)
 
     @staticmethod
@@ -136,10 +147,25 @@ class DenseRuleIndex:
         matrix = np.asarray(values, dtype=np.float32)
         if matrix.ndim != 2:
             raise RuleIndexError("Document embeddings must be a two-dimensional matrix")
+        if not np.all(np.isfinite(matrix)):
+            raise RuleIndexError("Document embeddings must contain only finite values")
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         if np.any(norms == 0):
             raise RuleIndexError("Document embeddings must not contain zero vectors")
         return matrix / norms
+
+    @staticmethod
+    def _validate_normalized_matrix(matrix: NDArray[np.float32]) -> None:
+        if not np.all(np.isfinite(matrix)):
+            raise RuleIndexError("Persisted embeddings must contain only finite values")
+        norms = np.linalg.norm(matrix, axis=1)
+        if not np.allclose(norms, 1.0, atol=1e-5):
+            raise RuleIndexError("Persisted embeddings must be normalized")
+
+
+def embeddings_fingerprint(embeddings: NDArray[np.float32]) -> str:
+    matrix = np.ascontiguousarray(embeddings, dtype=np.float32)
+    return hashlib.sha256(matrix.tobytes()).hexdigest()
 
 
 def corpus_fingerprint(chunks: Sequence[RuleChunk]) -> str:

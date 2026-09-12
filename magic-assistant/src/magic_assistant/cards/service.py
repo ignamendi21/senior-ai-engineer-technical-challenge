@@ -26,8 +26,14 @@ class CardSearchService:
                     unique_cards[identity] = card
             if len(unique_cards) >= filters.result_limit:
                 break
+            effective_page_size = page.page_size or DEFAULT_PAGE_SIZE
+            if (
+                page.total_count is not None
+                and page_number * effective_page_size >= page.total_count
+            ):
+                break
             returned_count = page.count if page.count is not None else len(page.cards)
-            if returned_count < DEFAULT_PAGE_SIZE or not page.cards:
+            if returned_count < effective_page_size or not page.cards:
                 break
         return list(unique_cards.values())[: filters.result_limit]
 

@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import Literal
@@ -81,7 +82,7 @@ class RulesKnowledgeBase:
         self._rule_index: dict[str, list[str]] = defaultdict(list)
         self._root_index: dict[str, list[str]] = defaultdict(list)
         self._section_index: dict[str, list[str]] = defaultdict(list)
-        self._term_index: dict[str, str] = {}
+        self._term_index: dict[str, list[str]] = defaultdict(list)
         for chunk in self._chunks:
             for rule_id in chunk.rule_ids:
                 self._rule_index[rule_id].append(chunk.chunk_id)
@@ -90,7 +91,11 @@ class RulesKnowledgeBase:
             if chunk.section_id and chunk.document_type == "rule":
                 self._section_index[chunk.section_id].append(chunk.chunk_id)
             if chunk.term:
-                self._term_index[chunk.term.casefold()] = chunk.chunk_id
+                self._term_index[self._normalize_term(chunk.term)].append(chunk.chunk_id)
+
+    @property
+    def chunk_count(self) -> int:
+        return len(self._chunks)
 
     def get_rule(self, rule_id: str) -> list[RuleEvidence]:
         normalized = rule_id.strip().lower().rstrip(".")
@@ -116,9 +121,8 @@ class RulesKnowledgeBase:
 
         exact = self._exact_matches(query)
         excluded = {evidence.chunk_id for evidence in exact}
-        candidate_count = min(len(self._chunks), max(top_k * 4, 20))
-        lexical_ids = self._lexical_ranking(query, candidate_count)
-        semantic_ids = self._semantic_ranking(query, candidate_count)
+        lexical_ids = self._lexical_ranking(query, len(self._chunks))
+        semantic_ids = self._semantic_ranking(query, len(self._chunks))
         lexical_set = set(lexical_ids)
         semantic_set = set(semantic_ids)
         fused = reciprocal_rank_fusion(
@@ -150,9 +154,11 @@ class RulesKnowledgeBase:
                 if evidence.chunk_id not in seen:
                     matches.append(evidence)
                     seen.add(evidence.chunk_id)
-        term_chunk_id = self._term_index.get(query.casefold().strip(" ?.!\"'"))
-        if term_chunk_id and term_chunk_id not in seen:
-            matches.append(self._to_evidence(self._chunk_by_id[term_chunk_id], 1.0, ["exact"]))
+        term_chunk_ids = self._term_index.get(self._normalize_term(query), [])
+        for chunk_id in term_chunk_ids:
+            if chunk_id not in seen:
+                matches.append(self._to_evidence(self._chunk_by_id[chunk_id], 1.0, ["exact"]))
+                seen.add(chunk_id)
         return matches
 
     def _lexical_ranking(self, query: str, limit: int) -> list[str]:
@@ -168,7 +174,12 @@ class RulesKnowledgeBase:
             -1
         )
         norm = float(np.linalg.norm(vector))
-        if norm == 0 or vector.shape[0] != self._dense_index.embeddings.shape[1]:
+        if (
+            not np.all(np.isfinite(vector))
+            or not np.isfinite(norm)
+            or norm == 0
+            or vector.shape[0] != self._dense_index.embeddings.shape[1]
+        ):
             raise RuleIndexError("Query embedding is incompatible with the dense index")
         scores = self._dense_index.embeddings @ (vector / norm)
         ranked_indices = sorted(
@@ -203,6 +214,16 @@ class RulesKnowledgeBase:
                 if len(results) >= top_k:
                     break
         return results[:top_k]
+
+    @staticmethod
+    def _normalize_term(term: str) -> str:
+        normalized = unicodedata.normalize("NFKC", term).casefold().strip()
+        normalized = normalized.strip(
+            "".join(
+                character for character in normalized if unicodedata.category(character)[0] == "P"
+            )
+        )
+        return " ".join(normalized.split())
 
     @staticmethod
     def _searchable_text(chunk: RuleChunk) -> str:

@@ -41,6 +41,16 @@ def make_client(handler, *, max_retries: int = 0, sleep=lambda _: None):
     return api_client, http_client
 
 
+def test_validates_public_pagination_arguments():
+    client, http_client = make_client(lambda request: httpx.Response(200, json={"cards": []}))
+
+    with pytest.raises(ValueError, match="page must be positive"):
+        client.fetch_cards({}, page=0)
+    with pytest.raises(ValueError, match="page_size"):
+        client.fetch_cards({}, page=1, page_size=101)
+    http_client.close()
+
+
 def test_builds_pagination_parameters_and_normalizes_response():
     captured_request = None
 

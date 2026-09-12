@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from magic_assistant.rules.embeddings import DEFAULT_EMBEDDING_MODEL
 from magic_assistant.rules.index import DEFAULT_INDEX_DIRECTORY
 from magic_assistant.rules.retrieval import RuleEvidence, RulesKnowledgeBase
 from magic_assistant.rules.search import DEFAULT_PDF_PATH, load_knowledge_base
@@ -38,7 +39,7 @@ def evaluate_retrieval(
         raise ValueError("Retrieval benchmark must contain at least one case")
     ranks = []
     for case in cases:
-        evidence = knowledge_base.search(case.query, top_k=5)
+        evidence = knowledge_base.search(case.query, top_k=knowledge_base.chunk_count)
         rank = next(
             (
                 index
@@ -69,13 +70,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pdf", type=Path, default=DEFAULT_PDF_PATH)
     parser.add_argument("--index-dir", type=Path, default=DEFAULT_INDEX_DIRECTORY)
+    parser.add_argument("--model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--cases", type=Path, default=DEFAULT_BENCHMARK_PATH)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_argument_parser().parse_args(argv)
-    knowledge_base = load_knowledge_base(arguments.pdf, arguments.index_dir)
+    knowledge_base = load_knowledge_base(
+        arguments.pdf,
+        arguments.index_dir,
+        model_name=arguments.model,
+    )
     cases = load_cases(arguments.cases)
     metrics = evaluate_retrieval(knowledge_base, cases)
     print(f"Cases: {metrics.case_count}")

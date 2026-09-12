@@ -5,6 +5,8 @@ from magic_assistant.rules.retrieval import RuleEvidence
 
 
 class StubKnowledgeBase:
+    chunk_count = 3
+
     def search(self, query: str, top_k: int = 5) -> list[RuleEvidence]:
         identifiers = {
             "first": ["702.7", "702.49", "510"],

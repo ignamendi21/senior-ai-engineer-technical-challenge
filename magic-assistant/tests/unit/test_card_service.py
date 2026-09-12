@@ -1,3 +1,5 @@
+import pytest
+
 from magic_assistant.cards.client import CardPage, RateLimitInfo
 from magic_assistant.cards.models import Card, CardRuling, CardSearchFilters, MagicColor
 from magic_assistant.cards.service import (
@@ -90,6 +92,13 @@ def test_translates_supported_filters_to_api_parameters():
     }
 
 
+def test_rejects_contradictory_or_unknown_filters():
+    with pytest.raises(ValueError, match="configured mana-value range"):
+        CardSearchFilters(mana_value=5, max_mana_value_exclusive=2)
+    with pytest.raises(ValueError, match="Extra inputs"):
+        CardSearchFilters(max_mana_value=2)
+
+
 def test_client_side_filter_enforces_exclusive_mana_range_and_color():
     filters = warrior_filters()
     matching = make_card("1", "One-Mana Warrior", 1, colors=[MagicColor.WHITE])
@@ -135,6 +144,19 @@ def test_paginates_until_enough_unique_matches_are_found():
 
     assert [card.name for card in cards] == ["First Warrior", "Second Warrior"]
     assert [call[1] for call in client.calls] == [1, 2, 3]
+
+
+def test_uses_total_count_to_avoid_an_extra_page():
+    nonmatching = make_card("0", "Wrong Color", 1, colors=[MagicColor.BLACK])
+    page = card_page([nonmatching], count=100)
+    page.total_count = 100
+    page.page_size = 100
+    client = FakeCardClient([page])
+
+    cards = CardSearchService(client).search(warrior_filters(max_pages=2))
+
+    assert cards == []
+    assert len(client.calls) == 1
 
 
 def test_stops_at_configured_maximum_pages():

@@ -10,9 +10,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Inspect deterministic MTG card search")
     parser.add_argument("--name")
     parser.add_argument("--color", action="append", choices=[color.value for color in MagicColor])
+    parser.add_argument(
+        "--color-identity",
+        action="append",
+        choices=[color.value for color in MagicColor],
+    )
     parser.add_argument("--type", dest="types", action="append")
     parser.add_argument("--subtype", dest="subtypes", action="append")
     parser.add_argument("--text")
+    parser.add_argument("--rarity")
+    parser.add_argument("--set", dest="set_code")
     parser.add_argument("--cmc", type=float)
     parser.add_argument("--min-cmc", type=float)
     parser.add_argument("--max-cmc", type=float)
@@ -26,9 +33,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     filters = CardSearchFilters(
         name=arguments.name,
         colors=[MagicColor(color) for color in arguments.color or []],
+        color_identity=[MagicColor(color) for color in arguments.color_identity or []],
         types=arguments.types or [],
         subtypes=arguments.subtypes or [],
         text=arguments.text,
+        rarity=arguments.rarity,
+        set_code=arguments.set_code,
         mana_value=arguments.cmc,
         min_mana_value=arguments.min_cmc,
         max_mana_value_exclusive=arguments.max_cmc,

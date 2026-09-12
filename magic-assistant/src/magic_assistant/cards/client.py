@@ -1,3 +1,4 @@
+import math
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -68,6 +69,10 @@ class MtgApiClient:
     ) -> None:
         if max_retries < 0:
             raise ValueError("max_retries must not be negative")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be positive and finite")
+        if not math.isfinite(backoff_seconds) or backoff_seconds < 0:
+            raise ValueError("backoff_seconds must be nonnegative and finite")
         self._base_url = base_url.rstrip("/")
         self._max_retries = max_retries
         self._backoff_seconds = backoff_seconds
@@ -85,6 +90,10 @@ class MtgApiClient:
         page: int,
         page_size: int = DEFAULT_PAGE_SIZE,
     ) -> CardPage:
+        if page < 1:
+            raise ValueError("page must be positive")
+        if not 1 <= page_size <= DEFAULT_PAGE_SIZE:
+            raise ValueError(f"page_size must be between 1 and {DEFAULT_PAGE_SIZE}")
         params = {**filters, "page": str(page), "pageSize": str(page_size)}
         response = self._request("/cards", params)
         rate_limit = self._rate_limit(response.headers)

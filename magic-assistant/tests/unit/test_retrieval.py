@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
 import numpy as np
+import pytest
 
 from magic_assistant.rules.chunker import RuleChunk
 from magic_assistant.rules.index import DenseRuleIndex
@@ -142,6 +143,16 @@ def test_glossary_expands_one_hop_to_related_rule_without_duplicates():
     assert evidence[1].root_rule_id == "702.49"
     assert evidence[1].retrieval_methods == ["glossary_expansion"]
     assert len({item.chunk_id for item in evidence}) == len(evidence)
+
+
+def test_rejects_non_finite_query_embedding():
+    knowledge_base = build_knowledge_base()
+    knowledge_base._embedding_provider.encode_query = lambda text: np.asarray(
+        [np.nan, 0.0, 0.0], dtype=np.float32
+    )
+
+    with pytest.raises(ValueError, match="incompatible"):
+        knowledge_base.search("ninjutsu")
 
 
 def test_evidence_preserves_provenance_metadata():

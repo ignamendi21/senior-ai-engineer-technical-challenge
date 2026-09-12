@@ -67,6 +67,8 @@ class Card(BaseModel):
 
 
 class CardSearchFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     colors: list[MagicColor] = Field(default_factory=list)
     color_identity: list[MagicColor] = Field(default_factory=list)
@@ -94,4 +96,12 @@ class CardSearchFilters(BaseModel):
             and self.min_mana_value >= self.max_mana_value_exclusive
         ):
             raise ValueError("min_mana_value must be lower than max_mana_value_exclusive")
+        if self.mana_value is not None and (
+            (self.min_mana_value is not None and self.mana_value < self.min_mana_value)
+            or (
+                self.max_mana_value_exclusive is not None
+                and self.mana_value >= self.max_mana_value_exclusive
+            )
+        ):
+            raise ValueError("mana_value must fall within the configured mana-value range")
         return self
