@@ -8,11 +8,17 @@ import pymupdf
 from magic_assistant.rules.models import GlossaryDocument, ParsedRules, RuleDocument
 
 RULES_VERSION = "2026-04-17"
+_SECTION_MAX_INDENT = 100
+_PARENT_RULE_MAX_INDENT = 115
+_SUBRULE_MAX_INDENT = 130
 
 _CHAPTER_RE = re.compile(r"^(?P<id>[1-9])\.\s+(?P<title>\S.*)$")
 _SECTION_RE = re.compile(r"^(?P<id>\d{3})\.\s+(?P<title>\S.*)$")
-_RULE_RE = re.compile(r"^(?P<id>\d{3}(?:\.\d+)+[a-z]?)\.?(?:\s+(?P<text>.*)|$)")
-_RULE_REFERENCE_RE = re.compile(r"(?<![\d.])(?P<id>[1-9]\d{2}(?:\.\d+)*(?:[a-z])?)(?!\d|\.\d)")
+_RULE_RE = re.compile(r"^(?P<id>\d{3}(?:\.\d+)+[a-z]?)\.?\s+(?P<text>\S.*)$")
+_RULE_REFERENCE_RE = re.compile(
+    r"\brules?\s+(?P<id>[1-9]\d{2}(?:\.\d+)*(?:[a-z])?)(?!\d|\.\d)",
+    re.IGNORECASE,
+)
 _SECTION_REFERENCE_RE = re.compile(r"\bsections?\s+(?P<id>[1-9])\b", re.IGNORECASE)
 
 
@@ -24,7 +30,8 @@ class RulesParseError(ValueError):
 class _ExtractedLine:
     text: str
     page: int
-    is_bold: bool = False
+    is_bold: bool | None = None
+    indent: float | None = None
 
 
 @dataclass
@@ -62,7 +69,7 @@ class ComprehensiveRulesParser:
         except pymupdf.FileDataError as error:
             raise RulesParseError(f"Could not read rules PDF: {path}") from error
 
-        return self._parse_extracted_pages(pages)
+        return self._parse_extracted_pages(pages, require_complete_document=True)
 
     def parse_pages(self, pages: Sequence[str]) -> ParsedRules:
         extracted_pages = [
@@ -73,7 +80,7 @@ class ComprehensiveRulesParser:
             ]
             for page_number, page in enumerate(pages, 1)
         ]
-        return self._parse_extracted_pages(extracted_pages)
+        return self._parse_extracted_pages(extracted_pages, require_complete_document=False)
 
     @staticmethod
     def _extract_pdf_page(page: pymupdf.Page, page_number: int) -> list[_ExtractedLine]:
@@ -88,12 +95,22 @@ class ComprehensiveRulesParser:
                             text=text,
                             page=page_number,
                             is_bold=bool(spans) and all(span["flags"] & 16 for span in spans),
+                            indent=line["bbox"][0],
                         )
                     )
         return extracted
 
-    def _parse_extracted_pages(self, pages: Sequence[Sequence[_ExtractedLine]]) -> ParsedRules:
+    def _parse_extracted_pages(
+        self,
+        pages: Sequence[Sequence[_ExtractedLine]],
+        *,
+        require_complete_document: bool,
+    ) -> ParsedRules:
         first_rules_page = self._find_first_rules_page(pages)
+        if first_rules_page is None:
+            if require_complete_document:
+                raise RulesParseError("Could not locate the rules body in the PDF")
+            first_rules_page = 0
         rules: list[RuleDocument] = []
         glossary: list[GlossaryDocument] = []
         current_rule: _RuleBuilder | None = None
@@ -109,7 +126,7 @@ class ComprehensiveRulesParser:
                 if line.text == "Credits":
                     if current_glossary:
                         glossary.append(self._build_glossary(current_glossary))
-                    return ParsedRules(rules=rules, glossary=glossary)
+                    return self._finish_parsing(rules, glossary, require_complete_document)
 
                 if line.text == "Glossary":
                     if current_rule:
@@ -134,7 +151,7 @@ class ComprehensiveRulesParser:
                     continue
 
                 chapter_match = _CHAPTER_RE.fullmatch(line.text)
-                if chapter_match:
+                if chapter_match and line.is_bold is not False:
                     if current_rule:
                         rules.append(self._build_rule(current_rule))
                         current_rule = None
@@ -145,7 +162,11 @@ class ComprehensiveRulesParser:
                     continue
 
                 section_match = _SECTION_RE.fullmatch(line.text)
-                if section_match:
+                if (
+                    section_match
+                    and chapter_id == section_match["id"][0]
+                    and (line.indent is None or line.indent < _SECTION_MAX_INDENT)
+                ):
                     if current_rule:
                         rules.append(self._build_rule(current_rule))
                     section_id = section_match["id"]
@@ -165,7 +186,7 @@ class ComprehensiveRulesParser:
                     continue
 
                 rule_match = _RULE_RE.fullmatch(line.text)
-                if rule_match:
+                if rule_match and self._is_rule_start(rule_match["id"], line.indent):
                     if current_rule:
                         rules.append(self._build_rule(current_rule))
                     rule_id = rule_match["id"]
@@ -192,18 +213,49 @@ class ComprehensiveRulesParser:
             rules.append(self._build_rule(current_rule))
         if current_glossary:
             glossary.append(self._build_glossary(current_glossary))
-        return ParsedRules(rules=rules, glossary=glossary)
+        return self._finish_parsing(rules, glossary, require_complete_document)
 
     @staticmethod
-    def _find_first_rules_page(pages: Sequence[Sequence[_ExtractedLine]]) -> int:
+    def _find_first_rules_page(pages: Sequence[Sequence[_ExtractedLine]]) -> int | None:
         for index, page in enumerate(pages):
+            chapter_match = _CHAPTER_RE.fullmatch(page[0].text) if page else None
             if (
-                page
-                and _CHAPTER_RE.fullmatch(page[0].text)
-                and any(_SECTION_RE.fullmatch(line.text) for line in page[1:])
+                chapter_match
+                and page[0].is_bold is not False
+                and any(
+                    (section_match := _SECTION_RE.fullmatch(line.text))
+                    and section_match["id"].startswith(chapter_match["id"])
+                    and (line.indent is None or line.indent < _SECTION_MAX_INDENT)
+                    for line in page[1:]
+                )
             ):
                 return index
-        return 0
+        return None
+
+    @staticmethod
+    def _finish_parsing(
+        rules: list[RuleDocument],
+        glossary: list[GlossaryDocument],
+        require_complete_document: bool,
+    ) -> ParsedRules:
+        parsed = ParsedRules(rules=rules, glossary=glossary)
+        if not require_complete_document:
+            return parsed
+
+        rule_ids = [rule.rule_id for rule in rules]
+        required_anchors = {"100", "100.1", "900"}
+        if not required_anchors.issubset(rule_ids) or not glossary:
+            raise RulesParseError("PDF does not contain the expected Comprehensive Rules structure")
+        if len(rule_ids) != len(set(rule_ids)):
+            raise RulesParseError("Parsed rule identifiers are not unique")
+        return parsed
+
+    @staticmethod
+    def _is_rule_start(rule_id: str, indent: float | None) -> bool:
+        if indent is None:
+            return True
+        maximum_indent = _SUBRULE_MAX_INDENT if rule_id[-1].isalpha() else _PARENT_RULE_MAX_INDENT
+        return indent < maximum_indent
 
     @staticmethod
     def _parent_rule_id(rule_id: str) -> str:
@@ -222,8 +274,8 @@ class ComprehensiveRulesParser:
 
     @staticmethod
     def _is_glossary_term(line: _ExtractedLine, next_text: str | None) -> bool:
-        if line.is_bold:
-            return True
+        if line.is_bold is not None:
+            return line.is_bold
         if not next_text or len(line.text) > 80 or line.text[-1] in ".:;?!":
             return False
         words = re.findall(r"[A-Za-z]+", line.text)

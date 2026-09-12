@@ -61,6 +61,8 @@ def test_large_group_splits_only_at_subrule_boundaries():
         for chunk in chunks
         if rule.rule_id in chunk.rule_ids
     )
+    assert chunks[0].parent_rule_id == "702"
+    assert chunks[-1].parent_rule_id == "702.49"
 
 
 def test_single_oversized_subrule_is_not_split_mid_text():

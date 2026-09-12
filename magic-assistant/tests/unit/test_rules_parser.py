@@ -1,9 +1,14 @@
 import os
 from pathlib import Path
 
+import pymupdf
 import pytest
 
-from magic_assistant.rules.parser import RULES_VERSION, ComprehensiveRulesParser
+from magic_assistant.rules.parser import (
+    RULES_VERSION,
+    ComprehensiveRulesParser,
+    RulesParseError,
+)
 
 
 @pytest.fixture
@@ -65,6 +70,12 @@ def test_extracts_rule_and_section_cross_references(parsed_rules):
     assert parsed_rules.find_rule("702.49b").related_rule_ids == ["702.7", "8"]
 
 
+def test_does_not_treat_bare_quantities_as_rule_references():
+    text = "A Commander deck contains exactly 100 cards. See rule 903.5."
+
+    assert ComprehensiveRulesParser.extract_references(text) == ["903.5"]
+
+
 def test_parses_glossary_as_first_class_document(parsed_rules):
     assert len(parsed_rules.glossary) == 1
     entry = parsed_rules.glossary[0]
@@ -91,6 +102,17 @@ def test_missing_pdf_has_useful_error(tmp_path):
         ComprehensiveRulesParser().parse_pdf(missing_path)
 
 
+def test_rejects_pdf_without_comprehensive_rules_structure(tmp_path):
+    unrelated_pdf = tmp_path / "unrelated.pdf"
+    with pymupdf.open() as document:
+        page = document.new_page()
+        page.insert_text((72, 72), "This is a valid PDF, but it is not the rules document.")
+        document.save(unrelated_pdf)
+
+    with pytest.raises(RulesParseError, match="Could not locate the rules body"):
+        ComprehensiveRulesParser().parse_pdf(unrelated_pdf)
+
+
 def test_real_pdf_smoke_when_available():
     default_pdf = Path(__file__).parents[2] / "data" / "MagicCompRules 20260417.pdf"
     pdf_path = Path(os.environ.get("MAGIC_RULES_PDF", default_pdf))
@@ -99,7 +121,11 @@ def test_real_pdf_smoke_when_available():
 
     parsed = ComprehensiveRulesParser().parse_pdf(pdf_path)
 
-    assert len(parsed.rules) > 3_000
-    assert len(parsed.glossary) > 800
+    assert len(parsed.rules) == 3_285
+    assert len({rule.rule_id for rule in parsed.rules}) == len(parsed.rules)
+    assert len(parsed.glossary) == 730
+    assert all(entry.definition for entry in parsed.glossary)
     assert parsed.find_rule("702.49").title == "Ninjutsu"
-    assert any(entry.term == "Ninjutsu" for entry in parsed.glossary)
+    assert next(
+        entry for entry in parsed.glossary if entry.term == "Ninjutsu"
+    ).related_rule_ids == ["702.49"]

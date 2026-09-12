@@ -132,7 +132,7 @@ class RulesChunker:
         return RuleChunk(
             chunk_id=f"rule:{group_root.rule_id}:{index}",
             rule_ids=[rule.rule_id for rule in partition],
-            parent_rule_id=group_root.parent_rule_id,
+            parent_rule_id=partition[0].parent_rule_id,
             chapter_id=group_root.chapter_id,
             chapter_title=group_root.chapter_title,
             section_id=group_root.section_id,
