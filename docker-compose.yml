@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: ./magic-assistant
+    image: magic-assistant-demo:local
+    command: ["uvicorn", "magic_assistant.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MAGIC_CHAT_MODEL: ${MAGIC_CHAT_MODEL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      MTG_API_CA_BUNDLE: ${MTG_API_CA_BUNDLE:-}
+      MAGIC_RULES_PDF: /app/data/MagicCompRules 20260417.pdf
+      MAGIC_INDEX_DIR: /app/data/index
+    volumes:
+      - ./magic-assistant/data:/app/data
+      - huggingface-cache:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ui:
+    build:
+      context: ./magic-assistant
+    image: magic-assistant-demo:local
+    command: ["streamlit", "run", "ui/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    environment:
+      MAGIC_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+
+volumes:
+  huggingface-cache:

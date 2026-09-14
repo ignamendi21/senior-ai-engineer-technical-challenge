@@ -150,7 +150,7 @@ def create_openai_model_from_environment() -> ChatOpenAI:
         raise AgentConfigurationError("MAGIC_CHAT_MODEL is required for a live model run")
     if not api_key:
         raise AgentConfigurationError("OPENAI_API_KEY is required for a live model run")
-    base_url = os.environ.get("OPENAI_BASE_URL")
+    base_url = os.environ.get("OPENAI_BASE_URL") or None
     return ChatOpenAI(
         model=model_name,
         api_key=api_key,
