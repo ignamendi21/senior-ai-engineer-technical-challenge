@@ -29,6 +29,7 @@ class GroundedAnswerGenerator(Protocol):
         self,
         *,
         question: str,
+        messages: Sequence[BaseMessage],
         response_language: str,
         rules_evidence: Sequence[RuleEvidence],
         cards: Sequence[Card],
@@ -41,6 +42,7 @@ class CustomCardGenerator(Protocol):
         self,
         *,
         request: CustomCardRequest,
+        original_question: str,
         rules_evidence: Sequence[RuleEvidence],
         response_language: str,
     ) -> CustomCard: ...
@@ -50,7 +52,7 @@ class OpenAIRequestPlanner:
     def __init__(self, model: ChatOpenAI) -> None:
         self._planner = cast(
             Runnable,
-            model.with_structured_output(RequestPlan, method="json_schema", strict=True),
+            model.with_structured_output(RequestPlan, method="json_schema", strict=False),
         )
 
     def plan(self, messages: Sequence[BaseMessage]) -> RequestPlan:
@@ -69,13 +71,14 @@ class OpenAIGroundedAnswerGenerator:
     def __init__(self, model: ChatOpenAI) -> None:
         self._generator = cast(
             Runnable,
-            model.with_structured_output(GroundedAnswerDraft, method="json_schema", strict=True),
+            model.with_structured_output(GroundedAnswerDraft, method="json_schema", strict=False),
         )
 
     def generate(
         self,
         *,
         question: str,
+        messages: Sequence[BaseMessage],
         response_language: str,
         rules_evidence: Sequence[RuleEvidence],
         cards: Sequence[Card],
@@ -83,6 +86,7 @@ class OpenAIGroundedAnswerGenerator:
     ) -> GroundedAnswerDraft:
         rules = "\n".join(evidence.model_dump_json() for evidence in rules_evidence)
         card_data = "\n".join(card.model_dump_json() for card in cards)
+        conversation = "\n".join(f"{message.type}: {message.content}" for message in messages[-8:])
         feedback = validation_feedback or "None"
         prompt = SystemMessage(
             content=(
@@ -95,7 +99,8 @@ class OpenAIGroundedAnswerGenerator:
         request = HumanMessage(
             content=(
                 f"Question: {question}\nLanguage: {response_language}\n"
-                f"Validation feedback: {feedback}\nRule evidence:\n{rules}\nCards:\n{card_data}"
+                f"Conversation:\n{conversation}\nValidation feedback: {feedback}\n"
+                f"Rule evidence:\n{rules}\nCards:\n{card_data}"
             )
         )
         return cast(GroundedAnswerDraft, self._generator.invoke([prompt, request]))
@@ -105,13 +110,14 @@ class OpenAICustomCardGenerator:
     def __init__(self, model: ChatOpenAI) -> None:
         self._generator = cast(
             Runnable,
-            model.with_structured_output(CustomCard, method="json_schema", strict=True),
+            model.with_structured_output(CustomCard, method="json_schema", strict=False),
         )
 
     def generate(
         self,
         *,
         request: CustomCardRequest,
+        original_question: str,
         rules_evidence: Sequence[RuleEvidence],
         response_language: str,
     ) -> CustomCard:
@@ -124,8 +130,8 @@ class OpenAICustomCardGenerator:
         )
         user = HumanMessage(
             content=(
-                f"Language: {response_language}\nRequest: {request.model_dump_json()}\n"
-                f"Mechanic evidence:\n{mechanics}"
+                f"Original request: {original_question}\nLanguage: {response_language}\n"
+                f"Extracted request: {request.model_dump_json()}\nMechanic evidence:\n{mechanics}"
             )
         )
         return cast(CustomCard, self._generator.invoke([prompt, user]))

@@ -204,6 +204,13 @@ class AssistantNodes:
                 "The Magic rules index is currently unavailable.",
                 "retrieve_custom_mechanics",
             )
+        if request.requested_mechanics and not evidence:
+            return self._service_error(
+                state,
+                "insufficient_mechanics_evidence",
+                "I couldn't find rules evidence for the requested custom-card mechanics.",
+                "retrieve_custom_mechanics",
+            )
         return {
             "rules_evidence": evidence,
             "route_trace": self._trace(state, "retrieve_custom_mechanics"),
@@ -215,6 +222,7 @@ class AssistantNodes:
         try:
             draft = self._dependencies.answer_generator.generate(
                 question=state["current_user_query"],
+                messages=state.get("messages", []),
                 response_language=plan.response_language,
                 rules_evidence=state.get("rules_evidence", []),
                 cards=state.get("cards", []),
@@ -256,8 +264,12 @@ class AssistantNodes:
             if plan.intent == RequestIntent.CARD_INTERACTION:
                 if not draft.used_rule_chunk_ids:
                     feedback.append("An interaction answer must use rule evidence.")
-                if not draft.used_card_ids:
-                    feedback.append("An interaction answer must use resolved card evidence.")
+                missing_cards = allowed_cards - set(draft.used_card_ids)
+                if missing_cards:
+                    missing = sorted(missing_cards)
+                    feedback.append(
+                        f"An interaction answer must use every resolved card: {missing}"
+                    )
         return {
             "source_validation_passed": not feedback,
             "validation_feedback": " ".join(feedback) or None,
@@ -277,6 +289,7 @@ class AssistantNodes:
         try:
             card = self._dependencies.custom_card_generator.generate(
                 request=request,
+                original_question=state["current_user_query"],
                 rules_evidence=state.get("rules_evidence", []),
                 response_language=plan.response_language,
             )
@@ -432,7 +445,11 @@ def build_assistant_graph(
         _route_service_result,
         {"success": "render_custom_card", "failure": "service_failure"},
     )
-    builder.add_edge("synthesize_grounded_answer", "validate_sources")
+    builder.add_conditional_edges(
+        "synthesize_grounded_answer",
+        _route_generation_result,
+        {"success": "validate_sources", "failure": "service_failure"},
+    )
     builder.add_conditional_edges(
         "validate_sources",
         _route_validation,
@@ -451,7 +468,8 @@ def build_assistant_graph(
         "grounding_fallback",
     ):
         builder.add_edge(terminal_node, END)
-    return builder.compile(checkpointer=checkpointer or InMemorySaver())
+    saver = checkpointer if checkpointer is not None else InMemorySaver()
+    return builder.compile(checkpointer=saver)
 
 
 def _route_plan(state: AssistantState) -> str:
@@ -462,6 +480,10 @@ def _route_plan(state: AssistantState) -> str:
 
 
 def _route_service_result(state: AssistantState) -> str:
+    return "failure" if state.get("errors") else "success"
+
+
+def _route_generation_result(state: AssistantState) -> str:
     return "failure" if state.get("errors") else "success"
 
 
@@ -480,11 +502,12 @@ class MagicAssistant:
     def invoke(self, question: str, *, thread_id: str) -> AssistantState:
         if not question.strip():
             raise ValueError("question must not be empty")
-        if not thread_id.strip():
+        normalized_thread_id = thread_id.strip()
+        if not normalized_thread_id:
             raise ValueError("thread_id must not be empty")
         result = self.graph.invoke(
             {"messages": [HumanMessage(content=question)]},
-            {"configurable": {"thread_id": thread_id}},
+            {"configurable": {"thread_id": normalized_thread_id}},
         )
         return cast(AssistantState, result)
 

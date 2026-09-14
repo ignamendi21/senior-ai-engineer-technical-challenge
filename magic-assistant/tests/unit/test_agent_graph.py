@@ -72,12 +72,20 @@ class FakeCardSearcher:
 
 
 class FakeAnswerGenerator:
-    def __init__(self, drafts: list[GroundedAnswerDraft] | None = None) -> None:
+    def __init__(
+        self,
+        drafts: list[GroundedAnswerDraft] | None = None,
+        *,
+        fail: bool = False,
+    ) -> None:
         self.drafts = list(drafts or [])
+        self.fail = fail
         self.calls = []
 
     def generate(self, **kwargs) -> GroundedAnswerDraft:
         self.calls.append(kwargs)
+        if self.fail:
+            raise RuntimeError("model unavailable")
         if self.drafts:
             return self.drafts.pop(0)
         rules = kwargs["rules_evidence"]
@@ -260,6 +268,40 @@ def test_interaction_enriches_rules_query_and_renders_rule_and_card_sources():
     assert "Ninja of the Deep Hours — MTG card API" in state["final_answer"]
 
 
+def test_interaction_requires_sources_for_every_resolved_card():
+    question = "How do these two cards interact?"
+    first = make_card("first", "First Card", "First strike")
+    second = make_card("second", "Second Card", "Ninjutsu {1}{U}")
+    evidence = make_rule_evidence("rule:702.49:1", "702.49")
+    answers = FakeAnswerGenerator(
+        [
+            GroundedAnswerDraft(
+                text="Incomplete",
+                used_rule_chunk_ids=[evidence.chunk_id],
+                used_card_ids=[first.id],
+            )
+        ]
+    )
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {
+            question: RequestPlan(
+                intent=RequestIntent.CARD_INTERACTION,
+                card_names=[first.name, second.name],
+            )
+        },
+        rules=FakeRulesRetriever([evidence]),
+        cards=FakeCardSearcher(named_results={first.name: [first], second.name: [second]}),
+        answers=answers,
+    )
+
+    state = assistant.invoke(question, thread_id="all-card-sources")
+
+    assert state["generation_attempts"] == 2
+    assert "every resolved card" in answers.calls[1]["validation_feedback"]
+    assert first.name in state["final_answer"]
+    assert second.name in state["final_answer"]
+
+
 def test_custom_card_route_retrieves_mechanics_and_marks_result():
     question = "Create a Han Solo card, white-red, with first strike."
     custom_request = CustomCardRequest(
@@ -281,9 +323,32 @@ def test_custom_card_route_retrieves_mechanics_and_marks_result():
 
     assert rules.queries == ["first strike"]
     assert custom.calls[0]["request"] == custom_request
+    assert custom.calls[0]["original_question"] == question
     assert CUSTOM_CARD_NOTICE in state["final_answer"]
     assert "Han Solo, Daring Captain" in state["final_answer"]
     assert answers.calls == []
+
+
+def test_requested_custom_mechanics_require_rules_evidence():
+    question = "Create a card with first strike"
+    custom = FakeCustomCardGenerator()
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {
+            question: RequestPlan(
+                intent=RequestIntent.CUSTOM_CARD,
+                custom_card_request=CustomCardRequest(requested_mechanics=["first strike"]),
+            )
+        },
+        rules=FakeRulesRetriever([]),
+        custom=custom,
+    )
+
+    state = assistant.invoke(question, thread_id="custom-no-evidence")
+
+    assert state["final_answer"] == (
+        "I couldn't find rules evidence for the requested custom-card mechanics."
+    )
+    assert custom.calls == []
 
 
 def test_out_of_scope_route_calls_no_services():
@@ -350,10 +415,24 @@ def test_repeated_invalid_grounding_returns_controlled_fallback():
     assert state["route_trace"].count("synthesize_grounded_answer") == 2
 
 
+def test_answer_generator_failure_uses_service_error_not_grounding_fallback():
+    question = "How many phases are in a turn?"
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {question: rules_plan(question)},
+        answers=FakeAnswerGenerator(fail=True),
+    )
+
+    state = assistant.invoke(question, thread_id="generation-failure")
+
+    assert state["generation_attempts"] == 1
+    assert state["final_answer"] == "The answer model could not produce a grounded response."
+    assert state["final_answer"] != GROUNDING_FALLBACK
+
+
 def test_same_thread_preserves_conversation_messages():
     first = "How does first strike work?"
     second = "What if I use ninjutsu after that?"
-    assistant, planner, _, _, _, _ = build_test_assistant(
+    assistant, planner, _, _, answers, _ = build_test_assistant(
         {first: rules_plan(first), second: rules_plan(second)}
     )
 
@@ -364,6 +443,9 @@ def test_same_thread_preserves_conversation_messages():
     assert first in second_history
     assert "Grounded answer." in second_history[1]
     assert second in second_history
+    generator_history = [str(message.content) for message in answers.calls[1]["messages"]]
+    assert first in generator_history
+    assert second in generator_history
 
 
 def test_thread_ids_isolate_conversation_history():
@@ -378,6 +460,26 @@ def test_thread_ids_isolate_conversation_history():
 
     isolated_history = [str(message.content) for message in planner.histories[1]]
     assert isolated_history == [isolated]
+
+
+def test_turn_local_state_is_reset_when_same_thread_changes_intent():
+    first = "How does first strike work?"
+    second = "What is the weather?"
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {
+            first: rules_plan(first),
+            second: RequestPlan(intent=RequestIntent.OUT_OF_SCOPE),
+        }
+    )
+
+    assistant.ask(first, thread_id="changing-intent")
+    state = assistant.invoke(second, thread_id="changing-intent")
+
+    assert state["request_plan"].intent == RequestIntent.OUT_OF_SCOPE
+    assert state["rules_evidence"] == []
+    assert state["cards"] == []
+    assert state["generation_attempts"] == 0
+    assert state["final_answer"] == SCOPE_RESPONSE
 
 
 def test_card_service_failure_returns_controlled_response():
