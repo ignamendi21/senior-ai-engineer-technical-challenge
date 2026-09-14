@@ -266,18 +266,33 @@ class AssistantNodes:
         if draft is None:
             feedback.append("No structured answer draft was produced.")
         else:
-            allowed_rules = {item.chunk_id for item in state.get("rules_evidence", [])}
+            evidence_by_chunk = {item.chunk_id: item for item in state.get("rules_evidence", [])}
             allowed_cards = {card.id for card in state.get("cards", [])}
-            unknown_rules = set(draft.used_rule_chunk_ids) - allowed_rules
+            unknown_chunks = {
+                source.chunk_id
+                for source in draft.rule_sources
+                if source.chunk_id not in evidence_by_chunk
+            }
             unknown_cards = set(draft.used_card_ids) - allowed_cards
-            if unknown_rules:
-                feedback.append(f"Unknown rule chunk IDs: {sorted(unknown_rules)}")
+            invalid_rule_ids = {
+                source.rule_id
+                for source in draft.rule_sources
+                if source.rule_id is not None
+                and source.chunk_id in evidence_by_chunk
+                and source.rule_id not in evidence_by_chunk[source.chunk_id].rule_ids
+            }
+            if unknown_chunks:
+                feedback.append(f"Unknown rule chunk IDs: {sorted(unknown_chunks)}")
+            if invalid_rule_ids:
+                feedback.append(
+                    f"Rule IDs do not belong to selected chunks: {sorted(invalid_rule_ids)}"
+                )
             if unknown_cards:
                 feedback.append(f"Unknown card IDs: {sorted(unknown_cards)}")
-            if plan.intent == RequestIntent.RULES_QUESTION and not draft.used_rule_chunk_ids:
+            if plan.intent == RequestIntent.RULES_QUESTION and not draft.rule_sources:
                 feedback.append("A rules answer must use at least one retrieved rule source.")
             if plan.intent == RequestIntent.CARD_INTERACTION:
-                if not draft.used_rule_chunk_ids:
+                if not draft.rule_sources:
                     feedback.append("An interaction answer must use rule evidence.")
                 missing_cards = allowed_cards - set(draft.used_card_ids)
                 if missing_cards:

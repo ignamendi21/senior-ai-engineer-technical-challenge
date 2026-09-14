@@ -16,6 +16,7 @@ from magic_assistant.agent.schemas import (
     GroundedAnswerDraft,
     RequestIntent,
     RequestPlan,
+    RuleSourceRef,
 )
 from magic_assistant.cards.client import CardApiConnectionError
 from magic_assistant.cards.models import Card, CardSearchFilters, MagicColor
@@ -100,7 +101,7 @@ class FakeAnswerGenerator:
         cards = kwargs["cards"]
         return GroundedAnswerDraft(
             text="Grounded answer.",
-            used_rule_chunk_ids=[rules[0].chunk_id] if rules else [],
+            rule_sources=[RuleSourceRef(chunk_id=rules[0].chunk_id)] if rules else [],
             used_card_ids=[card.id for card in cards],
         )
 
@@ -222,6 +223,92 @@ def test_rules_route_retrieves_and_renders_grounded_source():
     assert "PDF p. 80" in state["final_answer"]
 
 
+def test_multi_rule_chunk_renders_selected_exact_rule_id():
+    question = "What does rule 509.1h mean?"
+    evidence = make_rule_evidence("rule:509.1:2", "509.1")
+    evidence.rule_ids = ["509.1d", "509.1e", "509.1h", "509.1i"]
+    answers = FakeAnswerGenerator(
+        [
+            GroundedAnswerDraft(
+                text="It becomes an unblocked creature.",
+                rule_sources=[RuleSourceRef(chunk_id=evidence.chunk_id, rule_id="509.1h")],
+            )
+        ]
+    )
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {question: rules_plan(question)},
+        rules=FakeRulesRetriever([evidence]),
+        answers=answers,
+    )
+
+    state = assistant.invoke(question, thread_id="precise-rule")
+
+    assert "rule 509.1h" in state["final_answer"]
+    assert "rule 509.1 —" not in state["final_answer"]
+
+
+def test_invented_rule_inside_valid_chunk_is_rejected_then_retried():
+    question = "What does rule 509.1h mean?"
+    evidence = make_rule_evidence("rule:509.1:2", "509.1")
+    evidence.rule_ids = ["509.1h", "509.1i"]
+    answers = FakeAnswerGenerator(
+        [
+            GroundedAnswerDraft(
+                text="Invalid",
+                rule_sources=[RuleSourceRef(chunk_id=evidence.chunk_id, rule_id="509.1z")],
+            ),
+            GroundedAnswerDraft(
+                text="Valid",
+                rule_sources=[RuleSourceRef(chunk_id=evidence.chunk_id, rule_id="509.1h")],
+            ),
+        ]
+    )
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {question: rules_plan(question)},
+        rules=FakeRulesRetriever([evidence]),
+        answers=answers,
+    )
+
+    state = assistant.invoke(question, thread_id="invented-rule")
+
+    assert state["generation_attempts"] == 2
+    assert "do not belong" in answers.calls[1]["validation_feedback"]
+    assert "rule 509.1h" in state["final_answer"]
+
+
+def test_glossary_source_without_rule_id_renders_term():
+    question = "What is ninjutsu?"
+    evidence = RuleEvidence(
+        chunk_id="glossary:0001",
+        term="Ninjutsu",
+        text="A keyword ability.",
+        page_start=286,
+        page_end=286,
+        rules_version="2026-04-17",
+        score=1.0,
+        retrieval_methods=["terminology"],
+        document_type="glossary",
+    )
+    answers = FakeAnswerGenerator(
+        [
+            GroundedAnswerDraft(
+                text="Ninjutsu is a keyword ability.",
+                rule_sources=[RuleSourceRef(chunk_id=evidence.chunk_id)],
+            )
+        ]
+    )
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {question: rules_plan(question)},
+        rules=FakeRulesRetriever([evidence]),
+        answers=answers,
+    )
+
+    state = assistant.invoke(question, thread_id="glossary-source")
+
+    assert 'glossary "Ninjutsu"' in state["final_answer"]
+    assert "PDF p. 286" in state["final_answer"]
+
+
 def test_card_search_uses_typed_filters_and_deterministic_rendering():
     question = "Busca una criatura blanca guerrero de coste menor que 2"
     card = make_card("warrior-1", "Test Warrior", "Vigilance")
@@ -293,7 +380,7 @@ def test_interaction_requires_sources_for_every_resolved_card():
         [
             GroundedAnswerDraft(
                 text="Incomplete",
-                used_rule_chunk_ids=[evidence.chunk_id],
+                rule_sources=[RuleSourceRef(chunk_id=evidence.chunk_id)],
                 used_card_ids=[first.id],
             )
         ]
@@ -477,8 +564,10 @@ def test_grounding_retries_once_then_renders_valid_draft():
     evidence = make_rule_evidence()
     answers = FakeAnswerGenerator(
         [
-            GroundedAnswerDraft(text="Invalid", used_rule_chunk_ids=["unknown"]),
-            GroundedAnswerDraft(text="Valid", used_rule_chunk_ids=[evidence.chunk_id]),
+            GroundedAnswerDraft(text="Invalid", rule_sources=[RuleSourceRef(chunk_id="unknown")]),
+            GroundedAnswerDraft(
+                text="Valid", rule_sources=[RuleSourceRef(chunk_id=evidence.chunk_id)]
+            ),
         ]
     )
     assistant, _, _, _, _, _ = build_test_assistant(
@@ -502,7 +591,7 @@ def test_grounding_retries_once_then_renders_valid_draft():
 
 def test_repeated_invalid_grounding_returns_controlled_fallback():
     question = "How many phases are in a turn?"
-    invalid = GroundedAnswerDraft(text="Invalid", used_rule_chunk_ids=["unknown"])
+    invalid = GroundedAnswerDraft(text="Invalid", rule_sources=[RuleSourceRef(chunk_id="unknown")])
     answers = FakeAnswerGenerator([invalid, invalid])
     assistant, _, _, _, _, _ = build_test_assistant(
         {

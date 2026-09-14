@@ -23,12 +23,19 @@ def render_grounded_answer(
     rules_by_id = {evidence.chunk_id: evidence for evidence in rules_evidence}
     cards_by_id = {card.id: card for card in cards}
     sources = []
-    for chunk_id in dict.fromkeys(draft.used_rule_chunk_ids):
-        evidence = rules_by_id[chunk_id]
-        if evidence.root_rule_id:
-            label = f"rule {evidence.root_rule_id}"
+    seen_rule_sources: set[tuple[str, str | None]] = set()
+    for source in draft.rule_sources:
+        source_key = (source.chunk_id, source.rule_id)
+        if source_key in seen_rule_sources:
+            continue
+        seen_rule_sources.add(source_key)
+        evidence = rules_by_id[source.chunk_id]
+        if source.rule_id:
+            label = f"rule {source.rule_id}"
         elif evidence.term:
             label = f'glossary "{evidence.term}"'
+        elif evidence.root_rule_id:
+            label = f"rule {evidence.root_rule_id}"
         else:
             label = "rules evidence"
         pages = (

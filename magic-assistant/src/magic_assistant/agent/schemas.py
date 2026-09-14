@@ -33,11 +33,18 @@ class RequestPlan(BaseModel):
     response_language: str = "en"
 
 
+class RuleSourceRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_id: str
+    rule_id: str | None = None
+
+
 class GroundedAnswerDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1)
-    used_rule_chunk_ids: list[str] = Field(default_factory=list)
+    rule_sources: list[RuleSourceRef] = Field(default_factory=list)
     used_card_ids: list[str] = Field(default_factory=list)
 
 

@@ -93,8 +93,9 @@ class OpenAIGroundedAnswerGenerator:
             content=(
                 "Answer only from the supplied rule and card evidence. Distinguish rules from "
                 "Oracle text, be concise, and answer in the requested language. Do not write "
-                "source notation. Select used IDs only from the supplied evidence. If evidence "
-                "is insufficient, state that rather than inventing facts."
+                "source notation. Select rule chunk IDs, optional rule IDs within those chunks, "
+                "and card IDs only from supplied evidence. If evidence is insufficient, state "
+                "that rather than inventing facts."
             )
         )
         request = HumanMessage(
