@@ -5,6 +5,7 @@ description = "Deterministic Magic rules retrieval and card data access"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi==0.116.1",
     "httpx>=0.28.1",
     "langchain-core==1.6.1",
     "langchain-openai==1.6.0",
@@ -14,7 +15,9 @@ dependencies = [
     "pymupdf>=1.26.7,<2",
     "rank-bm25>=0.2.2",
     "sentence-transformers==6.0.0",
+    "streamlit==1.48.0",
     "truststore==0.10.4",
+    "uvicorn==0.35.0",
 ]
 
 [dependency-groups]
