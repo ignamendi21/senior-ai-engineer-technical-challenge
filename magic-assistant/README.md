@@ -1,12 +1,38 @@
-# Magic Assistant — Phases 1–3
+# Magic Assistant — Part 1 Complete
 
-The implementation has three independently testable layers:
+Part 1 is implemented as four independently testable layers:
 
 1. **Phase 1:** structure-aware ingestion of the Magic: The Gathering Comprehensive Rules.
 2. **Phase 2:** deterministic hybrid rules retrieval and Magic card API access.
 3. **Phase 3:** one explicit LangGraph conversational orchestrator with grounded generation.
+4. **Phase 4:** a thin FastAPI boundary and Streamlit demo client.
 
-Phase 3 includes a development terminal chat, not a web API or final UI.
+## Quick start
+
+From `magic-assistant/`:
+
+1. Place `MagicCompRules 20260417.pdf` in `data/`.
+2. Install the locked Python 3.12 environment: `uv sync --locked`.
+3. Build the local index:
+
+   ```console
+   uv run python -m magic_assistant.rules.index --pdf "data/MagicCompRules 20260417.pdf"
+   ```
+
+4. Export `OPENAI_API_KEY` and an operator-selected `MAGIC_CHAT_MODEL`.
+5. Start the API:
+
+   ```console
+   uv run uvicorn magic_assistant.api.app:app --host 127.0.0.1 --port 8000
+   ```
+
+6. In another terminal, start Streamlit:
+
+   ```console
+   uv run streamlit run ui/streamlit_app.py
+   ```
+
+Open the URL printed by Streamlit. The API also exposes interactive OpenAPI documentation at `/docs`.
 
 ## Requirements and setup
 
@@ -27,9 +53,25 @@ For a live agent run, configure environment variables from the root `.env.exampl
 - `OPENAI_API_KEY`: required secret; never commit it.
 - `MAGIC_CHAT_MODEL`: required model selected by the operator.
 - `OPENAI_BASE_URL`: optional OpenAI-compatible base URL.
-- `MAGIC_RULES_PDF` and `MAGIC_RULES_INDEX`: optional local smoke-test paths.
+- `MAGIC_RULES_PDF` and `MAGIC_INDEX_DIR`: optional local runtime paths.
+- `MAGIC_API_URL`: optional Streamlit backend URL; defaults to `http://localhost:8000`.
 
 No model name or API key is hard-coded.
+
+## Integrated architecture
+
+```mermaid
+flowchart LR
+    UI[Streamlit] -->|POST /api/chat| API[FastAPI]
+    API --> Runtime[Shared application runtime]
+    Runtime --> Graph[LangGraph StateGraph]
+    Graph --> Rules[Hybrid rules knowledge base]
+    Graph --> Cards[MTG API adapter]
+    Graph --> LLM[Structured OpenAI model]
+    Rules --> PDF[Rules PDF + local NumPy index]
+```
+
+FastAPI lifespan creates one shared runtime per process. The runtime owns the embedding model, validated local index, LangGraph/checkpointer, OpenAI adapters, and MTG HTTP client. Requests reuse these resources; no request rebuilds the index or reloads the embedding model.
 
 ## Source PDF
 
@@ -197,7 +239,7 @@ validate_custom_card_sources
   └─ invalid twice → grounding_fallback → END
 ```
 
-The maximum is two total synthesis attempts. A deterministic validator requires every selected rule chunk/card ID to belong to evidence in graph state. Rules answers require rule provenance; interaction answers require both rule and card provenance. Source lines and PDF pages are rendered by code, never invented by the model.
+The maximum is two total synthesis attempts. A deterministic validator requires every selected rule chunk/card ID to belong to evidence in graph state. A selected `rule_id` must also belong to that chunk's `rule_ids`, allowing citations such as `509.1h` from a multi-rule chunk. Rules answers require rule provenance; interaction answers require both rule and card provenance. Source lines and PDF pages are rendered by code, never invented by the model.
 
 Card interaction retrieval is enriched with the original question, planner mechanics query, resolved card names, and actual Oracle text. Named-card resolution prefers exact normalized names before a deterministic first candidate.
 
@@ -219,6 +261,45 @@ uv run python -m magic_assistant.agent.chat --pdf "data/MagicCompRules 20260417.
 
 Use `exit` or `quit` to stop. Reusing the same thread ID within the process preserves follow-up context.
 
+## Phase 4: API and Streamlit demo
+
+FastAPI initializes the shared live runtime once through application lifespan and closes its owned MTG HTTP client during shutdown. Importing the app does not load OpenAI, Hugging Face, the PDF, or the index. Missing or stale local artifacts leave `/health` alive and `/ready` unavailable with sanitized build-index guidance; the application never rebuilds embeddings during an HTTP request.
+
+Endpoints:
+
+- `GET /health`: process liveness.
+- `GET /ready`: local runtime initialization status without third-party probes.
+- `POST /api/chat`: typed `{message, thread_id}` conversation request.
+
+The chat response includes the answer, intent, graph route, validated structured rule/glossary/card sources, card presentation data, and an optional custom card. It excludes embeddings, BM25 internals, raw provider responses, prompts, and internal exceptions.
+
+Standard logging records a validated/generated `X-Request-ID`, method, path, status, latency, completed intent, route trace, and controlled error categories. User messages, full conversations, secrets, card payloads, and vectors are not logged.
+
+Streamlit is a thin HTTP client. It stores one thread ID and local display history in `st.session_state`, supports a new-conversation reset, shows readiness, cards and valid images, emphasizes custom-card status, and exposes a non-sensitive technical-details panel.
+
+### Demo prompts
+
+- Rules: `¿Cuántas fases tiene un turno?`
+- Rules: `¿Cómo funciona dañar primero?`
+- Card search: `Busca una criatura blanca guerrero de coste menor que 2`
+- Interaction: `My Battlefield Raptor already dealt first-strike damage. If I use Ninja of the Deep Hours with ninjutsu, can the Ninja deal combat damage?`
+- Custom: `Create a Han Solo card, white-red, with first strike.`
+- Follow-up: `And what if it had double strike instead?`
+
+Exact natural-language behavior depends on `MAGIC_CHAT_MODEL`; these prompts are not hard-coded.
+
+### Docker Compose
+
+From the repository root, after placing the PDF and building `magic-assistant/data/index` on the host:
+
+```console
+docker compose up --build
+```
+
+The same image runs FastAPI on port 8000 and Streamlit on port 8501 with different commands. Compose mounts `magic-assistant/data` and a reusable Hugging Face cache, allows a two-minute first-model-load health start period, and checks both services. The image contains no API key, PDF, generated index, or downloaded model weights. Secrets are passed only at local runtime through Compose environment interpolation.
+
+`MTG_API_CA_BUNDLE` host paths are intentionally not forwarded into the Linux container. Enterprise users should add a local Compose override that mounts the PEM file read-only and sets `MTG_API_CA_BUNDLE` to its container path.
+
 ## Known limitations
 
 - The rules parser targets the supplied English Comprehensive Rules layout.
@@ -231,4 +312,6 @@ Use `exit` or `quit` to stop. Reusing the same thread ID within the process pres
 - The live conversational provider is OpenAI; offline tests use injected deterministic fakes.
 - Grounding validation proves citation IDs came from supplied evidence; it does not perform claim-level semantic entailment verification.
 - Demo conversation memory is process-local and not durable.
-- This phase has no FastAPI, Streamlit, production deployment, or multi-agent system.
+- FastAPI and Streamlit are local demo boundaries, not a production deployment.
+- Streamlit displays remote images only from the expected `gatherer.wizards.com` host.
+- The demo has no durable checkpointer, authentication, rate limiting, cloud infrastructure, or multi-agent system.
