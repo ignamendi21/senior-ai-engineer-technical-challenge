@@ -11,6 +11,8 @@ from magic_assistant.api.schemas import (
     RuleSource,
 )
 
+_ALLOWED_IMAGE_HOSTS = {"gatherer.wizards.com"}
+
 
 class DemoApiError(RuntimeError):
     pass
@@ -59,7 +61,17 @@ def valid_image_url(value: str | None) -> bool:
     if not value:
         return False
     parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    try:
+        valid_port = parsed.port in {None, 80, 443}
+    except ValueError:
+        return False
+    return (
+        parsed.scheme in {"http", "https"}
+        and parsed.hostname in _ALLOWED_IMAGE_HOSTS
+        and parsed.username is None
+        and parsed.password is None
+        and valid_port
+    )
 
 
 def source_label(source: PublicSource) -> str:

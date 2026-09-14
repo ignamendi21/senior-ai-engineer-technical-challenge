@@ -1,5 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from magic_assistant.agent.runtime import RuntimeInitializationError
 from magic_assistant.agent.schemas import (
     CustomCard,
     CustomCardDraft,
@@ -124,6 +126,18 @@ def test_health_readiness_and_lifecycle_close():
     assert runtime.closed
 
 
+def test_lifespan_closes_runtime_when_application_context_raises():
+    runtime = FakeRuntime(grounded_state())
+
+    with (
+        pytest.raises(RuntimeError, match="test failure"),
+        TestClient(create_app(lambda: runtime)),
+    ):
+        raise RuntimeError("test failure")
+
+    assert runtime.closed
+
+
 def test_chat_passes_thread_and_returns_metadata_and_structured_sources():
     runtime = FakeRuntime(grounded_state())
     app = create_app(lambda: runtime)
@@ -226,6 +240,21 @@ def test_malformed_chat_input_returns_422_without_invoking_runtime():
 
     assert response.status_code == 422
     assert runtime.calls == []
+    assert "   " not in response.text
+    assert '"input"' not in response.text
+
+
+def test_known_runtime_initialization_error_exposes_safe_readiness_guidance():
+    def missing_index():
+        raise RuntimeInitializationError(
+            "Rules index is missing. Run `python -m magic_assistant.rules.index` first."
+        )
+
+    with TestClient(create_app(missing_index)) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert "rules.index" in response.json()["detail"]
 
 
 def test_runtime_initialization_failure_makes_readiness_and_chat_unavailable():
@@ -246,6 +275,19 @@ def test_runtime_initialization_failure_makes_readiness_and_chat_unavailable():
     }
     assert chat.status_code == 503
     assert "do not expose this" not in chat.text
+
+
+def test_internal_response_value_error_is_sanitized_as_500():
+    runtime = FakeRuntime({"final_answer": "invalid internal state"})
+
+    with TestClient(create_app(lambda: runtime)) as client:
+        response = client.post(
+            "/api/chat",
+            json={"message": "How does flying work?", "thread_id": "demo"},
+        )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal server error"}
 
 
 def test_unexpected_chat_failure_is_sanitized():

@@ -169,9 +169,11 @@ def _rule_public_source(
             page_start=evidence.page_start,
             page_end=evidence.page_end,
         )
+    if not evidence.root_rule_id:
+        raise ValueError("Rule evidence has no precise rule or root identifier")
     return RuleSource(
         version=evidence.rules_version,
-        rule_id=evidence.root_rule_id or ", ".join(evidence.rule_ids),
+        rule_id=evidence.root_rule_id,
         page_start=evidence.page_start,
         page_end=evidence.page_end,
     )

@@ -2,8 +2,10 @@ import os
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from magic_assistant.agent.runtime import LiveAssistantRuntime, RuntimeSettings
+from magic_assistant.api.app import create_app
 
 
 @pytest.mark.skipif(
@@ -23,8 +25,13 @@ def test_live_rules_question():
     ):
         pytest.skip("The local rules PDF and built index are required")
 
-    with LiveAssistantRuntime.create(settings) as runtime:
-        state = runtime.invoke("What are the phases of a turn?", thread_id="live-smoke")
+    runtime = LiveAssistantRuntime.create(settings)
+    with TestClient(create_app(lambda: runtime)) as client:
+        response = client.post(
+            "/api/chat",
+            json={"message": "What are the phases of a turn?", "thread_id": "live-smoke"},
+        )
 
-    assert state["final_answer"]
-    assert "Sources:" in state["final_answer"]
+    assert response.status_code == 200
+    assert response.json()["answer"]
+    assert response.json()["sources"]

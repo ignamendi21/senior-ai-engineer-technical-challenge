@@ -60,9 +60,8 @@ class LiveAssistantRuntime:
     def create(cls, settings: RuntimeSettings | None = None) -> "LiveAssistantRuntime":
         settings = settings or RuntimeSettings.from_environment()
         if not settings.rules_pdf.is_file():
-            location = settings.rules_pdf
             raise RuntimeInitializationError(
-                f"Rules PDF not found at {location}. Place the PDF or set MAGIC_RULES_PDF."
+                "Rules PDF is missing. Place it in data/ or set MAGIC_RULES_PDF."
             )
         if not (settings.index_directory / "manifest.json").is_file():
             raise RuntimeInitializationError(

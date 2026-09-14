@@ -64,6 +64,10 @@ def render_response(response: ChatResponse) -> None:
         st.write(f"Intent: `{details['intent']}`")
         st.write(f"Graph route: {details['route']}")
         st.write(f"Request ID: `{details['request_id']}`")
+        if details["sources"]:
+            st.write("Sources:")
+            for source in details["sources"]:
+                st.write(f"- {source}")
 
 
 for message in st.session_state.messages:

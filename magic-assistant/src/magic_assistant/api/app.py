@@ -3,11 +3,13 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from magic_assistant.agent.runtime import (
     AssistantRuntime,
     LiveAssistantRuntime,
+    RuntimeInitializationError,
 )
 from magic_assistant.api.middleware import observe_request
 from magic_assistant.api.schemas import (
@@ -28,14 +30,22 @@ def create_app(runtime_factory: RuntimeFactory = LiveAssistantRuntime.create) ->
         application.state.runtime = None
         application.state.runtime_error = None
         try:
-            application.state.runtime = runtime_factory()
-        except Exception as error:
-            application.state.runtime_error = "Assistant runtime initialization failed."
-            logger.error("runtime_initialization_failed error_type=%s", type(error).__name__)
-        yield
-        runtime = application.state.runtime
-        if runtime is not None:
-            runtime.close()
+            try:
+                application.state.runtime = runtime_factory()
+            except RuntimeInitializationError as error:
+                application.state.runtime_error = str(error)
+                logger.error("runtime_initialization_failed error_type=%s", type(error).__name__)
+            except Exception as error:
+                application.state.runtime_error = "Assistant runtime initialization failed."
+                logger.error("runtime_initialization_failed error_type=%s", type(error).__name__)
+            yield
+        finally:
+            runtime = application.state.runtime
+            if runtime is not None:
+                try:
+                    runtime.close()
+                except Exception as error:
+                    logger.error("runtime_shutdown_failed error_type=%s", type(error).__name__)
 
     application = FastAPI(
         title="Magic Assistant Demo API",
@@ -43,6 +53,13 @@ def create_app(runtime_factory: RuntimeFactory = LiveAssistantRuntime.create) ->
         lifespan=lifespan,
     )
     application.middleware("http")(observe_request)
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, error: RequestValidationError
+    ) -> JSONResponse:
+        details = [{"location": list(item["loc"]), "type": item["type"]} for item in error.errors()]
+        return JSONResponse(status_code=422, content={"detail": details})
 
     @application.exception_handler(Exception)
     async def unexpected_exception_handler(request: Request, error: Exception) -> JSONResponse:
@@ -83,8 +100,6 @@ def create_app(runtime_factory: RuntimeFactory = LiveAssistantRuntime.create) ->
                 thread_id=chat_request.thread_id,
                 request_id=request.state.request_id,
             )
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail="Invalid chat request") from error
         except Exception as error:
             logger.error(
                 "chat_failure request_id=%s error_type=%s",

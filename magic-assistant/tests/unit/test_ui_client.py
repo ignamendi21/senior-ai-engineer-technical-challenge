@@ -55,7 +55,10 @@ def test_source_label_and_image_validation():
     )
 
     assert source_label(source).endswith("rule 702.49 — PDF p. 160")
-    assert valid_image_url("https://example.test/card.jpg")
+    assert valid_image_url("https://gatherer.wizards.com/Handlers/Image.ashx?id=1")
+    assert not valid_image_url("http://127.0.0.1/card.jpg")
+    assert not valid_image_url("http://169.254.169.254/latest/meta-data")
+    assert not valid_image_url("https://user:password@gatherer.wizards.com/card.jpg")
     assert not valid_image_url("javascript:alert(1)")
     assert not valid_image_url(None)
 

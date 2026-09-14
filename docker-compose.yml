@@ -8,7 +8,6 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       MAGIC_CHAT_MODEL: ${MAGIC_CHAT_MODEL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      MTG_API_CA_BUNDLE: ${MTG_API_CA_BUNDLE:-}
       MAGIC_RULES_PDF: /app/data/MagicCompRules 20260417.pdf
       MAGIC_INDEX_DIR: /app/data/index
     volumes:
@@ -20,7 +19,8 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
       interval: 10s
       timeout: 3s
-      retries: 5
+      start_period: 120s
+      retries: 12
 
   ui:
     build:
@@ -34,6 +34,11 @@ services:
         condition: service_healthy
     ports:
       - "8501:8501"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   huggingface-cache:
