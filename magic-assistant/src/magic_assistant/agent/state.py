@@ -16,11 +16,11 @@ from magic_assistant.rules.retrieval import RuleEvidence
 class AssistantState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     current_user_query: str
-    request_plan: RequestPlan
+    request_plan: RequestPlan | None
     rules_evidence: list[RuleEvidence]
     cards: list[Card]
-    custom_card: CustomCard
-    draft_answer: GroundedAnswerDraft
+    custom_card: CustomCard | None
+    draft_answer: GroundedAnswerDraft | None
     final_answer: str
     generation_attempts: int
     source_validation_passed: bool
