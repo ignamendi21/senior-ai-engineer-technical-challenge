@@ -1,18 +1,27 @@
 import math
+import os
+import ssl
 import time
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 import httpx
+import truststore
 from pydantic import BaseModel, ValidationError
 
 from magic_assistant.cards.models import Card
 
 DEFAULT_BASE_URL = "https://api.magicthegathering.io/v1"
 DEFAULT_PAGE_SIZE = 100
+CA_BUNDLE_ENVIRONMENT_VARIABLE = "MTG_API_CA_BUNDLE"
 
 
 class CardApiError(RuntimeError):
+    pass
+
+
+class CardApiConfigurationError(CardApiError):
     pass
 
 
@@ -56,6 +65,22 @@ class CardPage(BaseModel):
     rate_limit: RateLimitInfo
 
 
+def create_tls_context(ca_bundle: Path | str | None = None) -> ssl.SSLContext:
+    configured_bundle = ca_bundle or os.environ.get(CA_BUNDLE_ENVIRONMENT_VARIABLE)
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    if configured_bundle:
+        bundle_path = Path(configured_bundle).expanduser()
+        if not bundle_path.is_file():
+            raise CardApiConfigurationError(f"MTG API CA bundle not found: {bundle_path}")
+        try:
+            context.load_verify_locations(cafile=str(bundle_path))
+        except (OSError, ssl.SSLError) as error:
+            raise CardApiConfigurationError(
+                f"Could not load MTG API CA bundle: {bundle_path}"
+            ) from error
+    return context
+
+
 class MtgApiClient:
     def __init__(
         self,
@@ -65,6 +90,8 @@ class MtgApiClient:
         max_retries: int = 2,
         backoff_seconds: float = 0.25,
         client: httpx.Client | None = None,
+        tls_context: ssl.SSLContext | None = None,
+        ca_bundle: Path | str | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if max_retries < 0:
@@ -73,6 +100,8 @@ class MtgApiClient:
             raise ValueError("timeout must be positive and finite")
         if not math.isfinite(backoff_seconds) or backoff_seconds < 0:
             raise ValueError("backoff_seconds must be nonnegative and finite")
+        if tls_context is not None and ca_bundle is not None:
+            raise ValueError("Provide either tls_context or ca_bundle, not both")
         self._base_url = base_url.rstrip("/")
         self._max_retries = max_retries
         self._backoff_seconds = backoff_seconds
@@ -81,6 +110,7 @@ class MtgApiClient:
         self._client = client or httpx.Client(
             timeout=httpx.Timeout(timeout),
             headers={"User-Agent": "magic-assistant/0.1"},
+            verify=tls_context or create_tls_context(ca_bundle),
         )
 
     def fetch_cards(

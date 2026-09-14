@@ -1,7 +1,12 @@
+import ssl
+
 import httpx
 import pytest
 
+import magic_assistant.cards.client as client_module
 from magic_assistant.cards.client import (
+    CA_BUNDLE_ENVIRONMENT_VARIABLE,
+    CardApiConfigurationError,
     CardApiConnectionError,
     CardApiNotFoundError,
     CardApiPayloadError,
@@ -9,6 +14,7 @@ from magic_assistant.cards.client import (
     CardApiRequestError,
     CardApiServerError,
     MtgApiClient,
+    create_tls_context,
 )
 from magic_assistant.cards.models import MagicColor
 
@@ -39,6 +45,39 @@ def make_client(handler, *, max_retries: int = 0, sleep=lambda _: None):
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
     api_client = MtgApiClient(client=http_client, max_retries=max_retries, sleep=sleep)
     return api_client, http_client
+
+
+def test_default_tls_context_uses_native_certificate_verification(monkeypatch):
+    monkeypatch.delenv(CA_BUNDLE_ENVIRONMENT_VARIABLE, raising=False)
+
+    context = create_tls_context()
+
+    assert context.check_hostname
+    assert context.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_ca_bundle_environment_extends_native_trust(monkeypatch, tmp_path):
+    bundle = tmp_path / "enterprise-ca.pem"
+    bundle.write_text("test certificate", encoding="utf-8")
+    loaded = []
+
+    class FakeTlsContext:
+        def load_verify_locations(self, *, cafile):
+            loaded.append(cafile)
+
+    fake_context = FakeTlsContext()
+    monkeypatch.setattr(client_module.truststore, "SSLContext", lambda protocol: fake_context)
+    monkeypatch.setenv(CA_BUNDLE_ENVIRONMENT_VARIABLE, str(bundle))
+
+    assert create_tls_context() is fake_context
+    assert loaded == [str(bundle)]
+
+
+def test_missing_explicit_ca_bundle_has_clear_error(tmp_path):
+    missing = tmp_path / "missing.pem"
+
+    with pytest.raises(CardApiConfigurationError, match="CA bundle not found"):
+        create_tls_context(missing)
 
 
 def test_validates_public_pagination_arguments():

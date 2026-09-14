@@ -131,7 +131,9 @@ Directly supported filters are sent to the API. Color codes use `W`, `U`, `B`, `
 
 Search is bounded by a result limit and maximum page count. Results are deduplicated by normalized card name. Among printings seen, the representative with more useful Oracle text, image, and ruling data wins, with stable set/ID tie-breaking.
 
-The client uses explicit timeouts, bounded exponential retries for network and 5xx failures, no blind retry for deterministic 4xx responses, typed failures, malformed-payload validation, and captured rate-limit headers.
+The client uses explicit timeouts, bounded exponential retries for network and 5xx failures, no blind retry for deterministic 4xx responses, typed failures, malformed-payload validation, and captured rate-limit headers. Internally created clients validate TLS with the operating system's native trust store through `truststore`, which supports public roots and enterprise-managed roots without disabling verification. An injected `httpx.Client` remains supported for tests.
+
+If an additional PEM CA bundle is required, set `MTG_API_CA_BUNDLE` to its path. The bundle extends native trust; certificate verification remains enabled. See the root `.env.example`.
 
 Inspect card search:
 
