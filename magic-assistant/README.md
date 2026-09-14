@@ -1,11 +1,12 @@
-# Magic Assistant — Phases 1 and 2
+# Magic Assistant — Phases 1–3
 
-The implemented foundation has two independently testable layers:
+The implementation has three independently testable layers:
 
 1. **Phase 1:** structure-aware ingestion of the Magic: The Gathering Comprehensive Rules.
 2. **Phase 2:** deterministic hybrid rules retrieval and Magic card API access.
+3. **Phase 3:** one explicit LangGraph conversational orchestrator with grounded generation.
 
-There is no LLM, agent, chat interface, web API, or UI in these phases.
+Phase 3 includes a development terminal chat, not a web API or final UI.
 
 ## Requirements and setup
 
@@ -20,6 +21,15 @@ uv sync --locked
 ```
 
 The first real retrieval run downloads `intfloat/multilingual-e5-small` through Sentence Transformers into the user's external Hugging Face cache. Model weights are not stored in this repository.
+
+For a live agent run, configure environment variables from the root `.env.example`:
+
+- `OPENAI_API_KEY`: required secret; never commit it.
+- `MAGIC_CHAT_MODEL`: required model selected by the operator.
+- `OPENAI_BASE_URL`: optional OpenAI-compatible base URL.
+- `MAGIC_RULES_PDF` and `MAGIC_RULES_INDEX`: optional local smoke-test paths.
+
+No model name or API key is hard-coded.
 
 ## Source PDF
 
@@ -46,13 +56,22 @@ $env:MAGIC_RULES_PDF = "C:\path\to\MagicCompRules 20260417.pdf"
 uv run pytest
 ```
 
-Unit tests inject deterministic fake embeddings and mocked HTTP transports. They do not download a model or call the Internet.
+Unit tests inject deterministic planners, generators, retrievers, embedding providers, and mocked HTTP transports. They do not call OpenAI, download a model, or use the Internet.
 
 The optional live MTG API smoke test is disabled by default:
 
 ```powershell
 $env:RUN_LIVE_MTG_API_TESTS = "1"
 uv run pytest tests/integration/test_card_api_live.py
+```
+
+The optional OpenAI graph smoke test also requires the local PDF/index and explicit credentials:
+
+```powershell
+$env:RUN_LIVE_LLM_TESTS = "1"
+$env:OPENAI_API_KEY = "..."
+$env:MAGIC_CHAT_MODEL = "operator-selected-model"
+uv run pytest tests/integration/test_agent_live.py
 ```
 
 ## Phase 1: rules ingestion
@@ -143,6 +162,58 @@ uv run python -m magic_assistant.cards.inspect --color W --type Creature --subty
 
 `--max-cmc` is exclusive, so this example returns matching cards with mana value below 2.
 
+## Phase 3: LangGraph assistant
+
+The application uses one explicit `StateGraph`; it is not a multi-agent or unrestricted ReAct system. Supported planner intents are:
+
+- `rules_question`
+- `card_search`
+- `card_interaction`
+- `custom_card`
+- `out_of_scope`
+
+The planner only classifies and extracts typed domain data. Rules and card nodes call the approved deterministic services. Card searches are rendered directly from `Card` objects. Generative rules and interaction answers receive only retrieved `RuleEvidence` and resolved cards.
+
+OpenAI calls use LangChain `with_structured_output` with Pydantic schemas and native `json_schema` output. Provider-level strict mode is disabled because the nested domain schemas intentionally contain defaults and numeric constraints unsupported by OpenAI strict schemas; LangChain still validates returned data into the declared Pydantic models.
+
+### Graph overview
+
+```text
+START → plan_request
+  ├─ rules → retrieve_rules → synthesize_grounded_answer
+  ├─ card search → search_cards → render_card_search
+  ├─ interaction → resolve_named_cards → retrieve_interaction_rules → synthesize_grounded_answer
+  ├─ custom card → retrieve_custom_mechanics → generate_custom_card → render_custom_card
+  └─ out of scope → scope_response
+
+synthesize_grounded_answer → validate_sources
+  ├─ valid → render_answer → END
+  ├─ invalid, attempt remaining → synthesize_grounded_answer
+  └─ invalid twice → grounding_fallback → END
+```
+
+The maximum is two total synthesis attempts. A deterministic validator requires every selected rule chunk/card ID to belong to evidence in graph state. Rules answers require rule provenance; interaction answers require both rule and card provenance. Source lines and PDF pages are rendered by code, never invented by the model.
+
+Card interaction retrieval is enriched with the original question, planner mechanics query, resolved card names, and actual Oracle text. Named-card resolution prefers exact normalized names before a deterministic first candidate.
+
+Custom cards use a distinct `CustomCard` model and are always rendered with `CUSTOM / FAN-MADE — NOT AN OFFICIAL MAGIC CARD`. They are never sent to or mixed with records from the MTG API.
+
+Expected deterministic service failures become controlled user messages. Repeated invalid source selection becomes a safe grounding fallback rather than ungrounded prose.
+
+### Conversation threads
+
+The graph uses LangGraph `InMemorySaver`. Invoke it with a `thread_id`; messages accumulate only in that thread, so follow-up planning sees earlier user and assistant turns. Different IDs are isolated. Memory is in-process demo state and disappears on restart. A production deployment should use a durable PostgreSQL or Redis-backed checkpointer.
+
+### Development chat
+
+Build the rules index first, configure `OPENAI_API_KEY` and `MAGIC_CHAT_MODEL`, then run:
+
+```console
+uv run python -m magic_assistant.agent.chat --pdf "data/MagicCompRules 20260417.pdf" --thread-id demo
+```
+
+Use `exit` or `quit` to stop. Reusing the same thread ID within the process preserves follow-up context.
+
 ## Known limitations
 
 - The rules parser targets the supplied English Comprehensive Rules layout.
@@ -152,3 +223,7 @@ uv run python -m magic_assistant.cards.inspect --color W --type Creature --subty
 - The card API exposes printings rather than a canonical Oracle database; name-based deduplication is intentionally simple.
 - Card range filters may require multiple API pages because numeric comparisons are enforced client-side.
 - Live model download and card API inspection require working external network and TLS trust configuration.
+- The live conversational provider is OpenAI; offline tests use injected deterministic fakes.
+- Grounding validation proves citation IDs came from supplied evidence; it does not perform claim-level semantic entailment verification.
+- Demo conversation memory is process-local and not durable.
+- This phase has no FastAPI, Streamlit, production deployment, or multi-agent system.

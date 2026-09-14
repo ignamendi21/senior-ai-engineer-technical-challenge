@@ -75,3 +75,27 @@ Dense access is encapsulated behind `DenseRuleIndex` and `EmbeddingProvider`, al
 ### Consequences
 
 Startup can reuse a validated local index without recomputing document embeddings. Generated index artifacts and model weights remain uncommitted. Search remains an exact linear scan over a small normalized matrix; this choice should be revisited if corpus size or latency requirements change materially.
+
+## ADR-004 — Explicit single-agent orchestration with LangGraph
+
+**Status:** Accepted
+
+### Context
+
+The assistant has known workflows for rules questions, card searches, card interactions, custom card concepts, and out-of-scope requests. It must coordinate deterministic services, preserve conversation state, expose tool failures safely, and reject generated answers that reference evidence the graph did not supply.
+
+### Decision
+
+Use one LangGraph `StateGraph` with explicit typed state, inspectable nodes, conditional intent routing, deterministic rule/card service nodes, structured LLM planning and generation, and a source-validation loop bounded to two total synthesis attempts. LangChain Core and `langchain-openai` provide message/model abstractions and Pydantic structured output; LangGraph owns behavior, state, routing, and retry control.
+
+Compile the demo graph with `InMemorySaver`, keyed by invocation `thread_id`. A production deployment should use a durable external checkpointer such as PostgreSQL or Redis rather than process memory.
+
+### Alternatives considered
+
+- A single giant prompt: obscures tool execution, branching, failures, and grounding validation.
+- An autonomous ReAct loop for every request: unnecessary for known workflows and less predictable in latency, cost, and tool usage.
+- Multiple specialized agents: adds coordination complexity without a demonstrated need; the capabilities are deterministic branches of one assistant.
+
+### Consequences
+
+Explicit control flow improves observability, offline testability, latency predictability, and source grounding. It requires more orchestration code than one model call, but each branch and retry remains deterministic and bounded. Demo conversation state is lost when the process exits until a durable checkpointer is introduced in a later deployment phase.
