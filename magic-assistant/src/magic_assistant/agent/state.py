@@ -6,6 +6,7 @@ from langgraph.graph.message import add_messages
 from magic_assistant.agent.schemas import (
     AgentError,
     CustomCard,
+    CustomCardDraft,
     GroundedAnswerDraft,
     RequestPlan,
 )
@@ -20,6 +21,7 @@ class AssistantState(TypedDict, total=False):
     rules_evidence: list[RuleEvidence]
     cards: list[Card]
     custom_card: CustomCard | None
+    custom_card_draft: CustomCardDraft | None
     draft_answer: GroundedAnswerDraft | None
     final_answer: str
     generation_attempts: int

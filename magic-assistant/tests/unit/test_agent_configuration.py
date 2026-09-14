@@ -7,7 +7,7 @@ from magic_assistant.agent.llm import (
     OpenAIRequestPlanner,
     create_openai_model_from_environment,
 )
-from magic_assistant.agent.schemas import CustomCard, GroundedAnswerDraft, RequestPlan
+from magic_assistant.agent.schemas import CustomCardDraft, GroundedAnswerDraft, RequestPlan
 
 
 class SpyModel:
@@ -29,7 +29,7 @@ def test_openai_adapters_use_pydantic_json_schema_without_incompatible_strict_mo
     assert model.calls == [
         (RequestPlan, {"method": "json_schema", "strict": False}),
         (GroundedAnswerDraft, {"method": "json_schema", "strict": False}),
-        (CustomCard, {"method": "json_schema", "strict": False}),
+        (CustomCardDraft, {"method": "json_schema", "strict": False}),
     ]
 
 

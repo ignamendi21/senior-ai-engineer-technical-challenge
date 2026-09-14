@@ -183,12 +183,17 @@ START → plan_request
   ├─ rules → retrieve_rules → synthesize_grounded_answer
   ├─ card search → search_cards → render_card_search
   ├─ interaction → resolve_named_cards → retrieve_interaction_rules → synthesize_grounded_answer
-  ├─ custom card → retrieve_custom_mechanics → generate_custom_card → render_custom_card
+  ├─ custom card → retrieve_custom_mechanics → generate_custom_card → validate_custom_card_sources
   └─ out of scope → scope_response
 
 synthesize_grounded_answer → validate_sources
   ├─ valid → render_answer → END
   ├─ invalid, attempt remaining → synthesize_grounded_answer
+  └─ invalid twice → grounding_fallback → END
+
+validate_custom_card_sources
+  ├─ valid → render_custom_card → END
+  ├─ invalid, attempt remaining → generate_custom_card
   └─ invalid twice → grounding_fallback → END
 ```
 
@@ -196,7 +201,7 @@ The maximum is two total synthesis attempts. A deterministic validator requires 
 
 Card interaction retrieval is enriched with the original question, planner mechanics query, resolved card names, and actual Oracle text. Named-card resolution prefers exact normalized names before a deterministic first candidate.
 
-Custom cards use a distinct `CustomCard` model and are always rendered with `CUSTOM / FAN-MADE — NOT AN OFFICIAL MAGIC CARD`. They are never sent to or mixed with records from the MTG API.
+Custom cards use distinct `CustomCard`/`CustomCardDraft` models and are always rendered with `CUSTOM / FAN-MADE — NOT AN OFFICIAL MAGIC CARD`. Each requested known mechanic must independently resolve through exact/terminology evidence, and generated source IDs pass the same bounded allowlist validation principle. Custom cards are never sent to or mixed with records from the MTG API.
 
 Expected deterministic service failures become controlled user messages. Repeated invalid source selection becomes a safe grounding fallback rather than ungrounded prose.
 

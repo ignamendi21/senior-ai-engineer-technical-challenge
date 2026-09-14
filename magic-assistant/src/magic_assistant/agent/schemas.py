@@ -54,6 +54,13 @@ class CustomCard(BaseModel):
     flavor_text: str | None = None
 
 
+class CustomCardDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    card: CustomCard
+    used_rule_chunk_ids: list[str] = Field(default_factory=list)
+
+
 class AgentError(BaseModel):
     category: str
     user_message: str

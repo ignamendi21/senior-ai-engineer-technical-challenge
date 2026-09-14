@@ -7,7 +7,7 @@ from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 
 from magic_assistant.agent.schemas import (
-    CustomCard,
+    CustomCardDraft,
     CustomCardRequest,
     GroundedAnswerDraft,
     RequestPlan,
@@ -45,7 +45,8 @@ class CustomCardGenerator(Protocol):
         original_question: str,
         rules_evidence: Sequence[RuleEvidence],
         response_language: str,
-    ) -> CustomCard: ...
+        validation_feedback: str | None,
+    ) -> CustomCardDraft: ...
 
 
 class OpenAIRequestPlanner:
@@ -110,7 +111,7 @@ class OpenAICustomCardGenerator:
     def __init__(self, model: ChatOpenAI) -> None:
         self._generator = cast(
             Runnable,
-            model.with_structured_output(CustomCard, method="json_schema", strict=False),
+            model.with_structured_output(CustomCardDraft, method="json_schema", strict=False),
         )
 
     def generate(
@@ -120,21 +121,25 @@ class OpenAICustomCardGenerator:
         original_question: str,
         rules_evidence: Sequence[RuleEvidence],
         response_language: str,
-    ) -> CustomCard:
+        validation_feedback: str | None,
+    ) -> CustomCardDraft:
         mechanics = "\n".join(evidence.model_dump_json() for evidence in rules_evidence)
+        feedback = validation_feedback or "None"
         prompt = SystemMessage(
             content=(
                 "Create a balanced fan-made Magic card using the structured request and supplied "
-                "mechanic rules. Use standard Oracle-style wording where evidence supports it."
+                "mechanic rules. Use standard Oracle-style wording where evidence supports it. "
+                "Select used rule chunk IDs only from the supplied mechanic evidence."
             )
         )
         user = HumanMessage(
             content=(
                 f"Original request: {original_question}\nLanguage: {response_language}\n"
+                f"Validation feedback: {feedback}\n"
                 f"Extracted request: {request.model_dump_json()}\nMechanic evidence:\n{mechanics}"
             )
         )
-        return cast(CustomCard, self._generator.invoke([prompt, user]))
+        return cast(CustomCardDraft, self._generator.invoke([prompt, user]))
 
 
 def create_openai_model_from_environment() -> ChatOpenAI:

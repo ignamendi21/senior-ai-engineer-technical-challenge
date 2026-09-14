@@ -11,6 +11,7 @@ from magic_assistant.agent.graph import (
 from magic_assistant.agent.rendering import CUSTOM_CARD_NOTICE, GROUNDING_FALLBACK, SCOPE_RESPONSE
 from magic_assistant.agent.schemas import (
     CustomCard,
+    CustomCardDraft,
     CustomCardRequest,
     GroundedAnswerDraft,
     RequestIntent,
@@ -37,8 +38,15 @@ class FakePlanner:
 
 
 class FakeRulesRetriever:
-    def __init__(self, evidence: list[RuleEvidence], *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        evidence: list[RuleEvidence],
+        *,
+        results_by_query: dict[str, list[RuleEvidence]] | None = None,
+        fail: bool = False,
+    ) -> None:
         self.evidence = evidence
+        self.results_by_query = results_by_query or {}
         self.fail = fail
         self.queries: list[str] = []
 
@@ -46,7 +54,7 @@ class FakeRulesRetriever:
         self.queries.append(query)
         if self.fail:
             raise RuntimeError("index unavailable")
-        return self.evidence[:top_k]
+        return self.results_by_query.get(query, self.evidence)[:top_k]
 
 
 class FakeCardSearcher:
@@ -98,12 +106,16 @@ class FakeAnswerGenerator:
 
 
 class FakeCustomCardGenerator:
-    def __init__(self) -> None:
+    def __init__(self, drafts: list[CustomCardDraft] | None = None) -> None:
+        self.drafts = list(drafts or [])
         self.calls = []
 
-    def generate(self, **kwargs) -> CustomCard:
+    def generate(self, **kwargs) -> CustomCardDraft:
         self.calls.append(kwargs)
-        return CustomCard(
+        if self.drafts:
+            return self.drafts.pop(0)
+        rules = kwargs["rules_evidence"]
+        card = CustomCard(
             name="Han Solo, Daring Captain",
             mana_cost="{1}{R}{W}",
             colors=[MagicColor.RED, MagicColor.WHITE],
@@ -112,6 +124,10 @@ class FakeCustomCardGenerator:
             power="3",
             toughness="2",
             flavor_text="Never tell me the odds.",
+        )
+        return CustomCardDraft(
+            card=card,
+            used_rule_chunk_ids=[rules[0].chunk_id] if rules else [],
         )
 
 
@@ -345,10 +361,100 @@ def test_requested_custom_mechanics_require_rules_evidence():
 
     state = assistant.invoke(question, thread_id="custom-no-evidence")
 
-    assert state["final_answer"] == (
-        "I couldn't find rules evidence for the requested custom-card mechanics."
-    )
+    assert state["final_answer"] == 'I could not verify the requested mechanic "first strike".'
     assert custom.calls == []
+
+
+def test_each_requested_custom_mechanic_requires_qualified_evidence():
+    question = "Create a card with first strike and starjump"
+    exact = make_rule_evidence("rule:702.7:1", "702.7")
+    semantic_only = make_rule_evidence("rule:999:1", "999")
+    semantic_only.retrieval_methods = ["semantic"]
+    rules = FakeRulesRetriever(
+        [],
+        results_by_query={"first strike": [exact], "starjump": [semantic_only]},
+    )
+    custom = FakeCustomCardGenerator()
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {
+            question: RequestPlan(
+                intent=RequestIntent.CUSTOM_CARD,
+                custom_card_request=CustomCardRequest(
+                    requested_mechanics=["first strike", "starjump"]
+                ),
+            )
+        },
+        rules=rules,
+        custom=custom,
+    )
+
+    state = assistant.invoke(question, thread_id="partial-mechanics")
+
+    assert rules.queries == ["first strike", "starjump"]
+    assert state["final_answer"] == 'I could not verify the requested mechanic "starjump".'
+    assert custom.calls == []
+
+
+def test_custom_card_source_validation_retries_once():
+    question = "Create a card with first strike"
+    evidence = make_rule_evidence("rule:702.7:1", "702.7")
+    card = CustomCard(
+        name="Test Knight",
+        colors=[MagicColor.WHITE],
+        type_line="Creature — Human Knight",
+        oracle_text="First strike",
+    )
+    custom = FakeCustomCardGenerator(
+        [
+            CustomCardDraft(card=card, used_rule_chunk_ids=["unknown"]),
+            CustomCardDraft(card=card, used_rule_chunk_ids=[evidence.chunk_id]),
+        ]
+    )
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {
+            question: RequestPlan(
+                intent=RequestIntent.CUSTOM_CARD,
+                custom_card_request=CustomCardRequest(requested_mechanics=["first strike"]),
+            )
+        },
+        rules=FakeRulesRetriever([evidence]),
+        custom=custom,
+    )
+
+    state = assistant.invoke(question, thread_id="custom-source-retry")
+
+    assert state["generation_attempts"] == 2
+    assert "Unknown rule chunk IDs" in custom.calls[1]["validation_feedback"]
+    assert CUSTOM_CARD_NOTICE in state["final_answer"]
+
+
+def test_repeated_invalid_custom_sources_return_controlled_fallback():
+    question = "Create a card with first strike"
+    evidence = make_rule_evidence("rule:702.7:1", "702.7")
+    card = CustomCard(
+        name="Test Knight",
+        type_line="Creature — Human Knight",
+        oracle_text="First strike",
+    )
+    invalid = CustomCardDraft(card=card, used_rule_chunk_ids=["unknown"])
+    custom = FakeCustomCardGenerator([invalid, invalid])
+    assistant, _, _, _, _, _ = build_test_assistant(
+        {
+            question: RequestPlan(
+                intent=RequestIntent.CUSTOM_CARD,
+                custom_card_request=CustomCardRequest(requested_mechanics=["first strike"]),
+            )
+        },
+        rules=FakeRulesRetriever([evidence]),
+        custom=custom,
+    )
+
+    state = assistant.invoke(question, thread_id="custom-source-fallback")
+
+    assert state["generation_attempts"] == 2
+    assert len(custom.calls) == 2
+    assert state["final_answer"] == GROUNDING_FALLBACK
+    assert state["route_trace"].count("generate_custom_card") == 2
 
 
 def test_out_of_scope_route_calls_no_services():
