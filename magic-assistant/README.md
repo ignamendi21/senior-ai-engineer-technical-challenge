@@ -79,7 +79,7 @@ The supplied PDF produces 3,285 unique rule/section records, 730 glossary entrie
 
 Search combines:
 
-1. Explicit rule-ID detection and exact glossary-term matching.
+1. Explicit rule-ID detection and controlled complete-token glossary terminology matching. Linked rule evidence precedes its supporting glossary entry; explicit rule IDs remain strongest.
 2. Deterministic BM25 tokenization and ranking.
 3. Normalized multilingual E5 query/document embeddings.
 4. Reciprocal Rank Fusion with a configurable default constant of 60.
@@ -121,7 +121,7 @@ Output includes rank, rule IDs, semantic root, title or glossary term, pages, re
 uv run python -m magic_assistant.rules.evaluation --pdf "data/MagicCompRules 20260417.pdf"
 ```
 
-The committed 14-case English/Spanish benchmark reports Hit@1, Hit@3, Hit@5, and full-ranking MRR. It measures whether expected rules are retrieved and does not assert a fabricated quality threshold in tests. The initial run with the supplied PDF and model produced Hit@1 0.214, Hit@3 1.000, Hit@5 1.000, and MRR 0.595.
+The committed 14-case English/Spanish benchmark reports per-query expected-rule ranks, Hit@1, Hit@3, Hit@5, and full-ranking MRR. It measures whether expected rules are retrieved and does not assert a fabricated quality threshold in tests. The Phase 2 baseline was Hit@1 0.214, Hit@3 1.000, Hit@5 1.000, and MRR 0.595. Controlled terminology anchoring produces Hit@1 0.714, Hit@3 0.929, Hit@5 1.000, and MRR 0.836 without changing expected answers or tuning RRF.
 
 ## Phase 2: Magic card API
 

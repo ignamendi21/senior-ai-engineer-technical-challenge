@@ -19,12 +19,19 @@ class RetrievalCase(BaseModel):
     language: str
 
 
+class RetrievalCaseResult(BaseModel):
+    query: str
+    expected_rule_ids: list[str]
+    rank: int | None
+
+
 class RetrievalMetrics(BaseModel):
     case_count: int
     hit_at_1: float
     hit_at_3: float
     hit_at_5: float
     mrr: float
+    results: list[RetrievalCaseResult]
 
 
 def load_cases(path: Path) -> list[RetrievalCase]:
@@ -37,7 +44,7 @@ def evaluate_retrieval(
 ) -> RetrievalMetrics:
     if not cases:
         raise ValueError("Retrieval benchmark must contain at least one case")
-    ranks = []
+    results = []
     for case in cases:
         evidence = knowledge_base.search(case.query, top_k=knowledge_base.chunk_count)
         rank = next(
@@ -48,7 +55,14 @@ def evaluate_retrieval(
             ),
             None,
         )
-        ranks.append(rank)
+        results.append(
+            RetrievalCaseResult(
+                query=case.query,
+                expected_rule_ids=case.expected_rule_ids,
+                rank=rank,
+            )
+        )
+    ranks = [result.rank for result in results]
     count = len(ranks)
     return RetrievalMetrics(
         case_count=count,
@@ -56,6 +70,7 @@ def evaluate_retrieval(
         hit_at_3=sum(rank is not None and rank <= 3 for rank in ranks) / count,
         hit_at_5=sum(rank is not None and rank <= 5 for rank in ranks) / count,
         mrr=sum(1 / rank for rank in ranks if rank is not None) / count,
+        results=results,
     )
 
 
@@ -84,6 +99,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     cases = load_cases(arguments.cases)
     metrics = evaluate_retrieval(knowledge_base, cases)
+    for result in metrics.results:
+        expected = ", ".join(result.expected_rule_ids)
+        print(f"rank={result.rank or 'miss'} expected={expected} query={result.query}")
     print(f"Cases: {metrics.case_count}")
     print(f"Hit@1: {metrics.hit_at_1:.3f}")
     print(f"Hit@3: {metrics.hit_at_3:.3f}")

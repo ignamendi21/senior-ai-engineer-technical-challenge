@@ -43,3 +43,4 @@ def test_calculates_hit_rates_and_mrr():
     assert metrics.hit_at_3 == pytest.approx(2 / 3)
     assert metrics.hit_at_5 == pytest.approx(2 / 3)
     assert metrics.mrr == pytest.approx((1 + 1 / 3) / 3)
+    assert [result.rank for result in metrics.results] == [1, 3, None]

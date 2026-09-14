@@ -22,7 +22,11 @@ class FakeEmbeddingProvider:
         normalized = text.casefold()
         if "ninjutsu" in normalized or "sigilo" in normalized:
             return np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
-        if "first strike" in normalized or "dañar primero" in normalized:
+        if (
+            "first strike" in normalized
+            or "striking first" in normalized
+            or "dañar primero" in normalized
+        ):
             return np.asarray([0.0, 1.0, 0.0], dtype=np.float32)
         return np.asarray([0.0, 0.0, 1.0], dtype=np.float32)
 
@@ -82,6 +86,22 @@ def build_knowledge_base() -> RulesKnowledgeBase:
             section_id="",
         ),
         make_chunk(
+            "glossary:0002",
+            term="Commander Ninjutsu",
+            text="Commander Ninjutsu\nA variant of ninjutsu.",
+            related_rule_ids=["702.49"],
+            document_type="glossary",
+            section_id="",
+        ),
+        make_chunk(
+            "glossary:0003",
+            term="First Strike",
+            text="First Strike\nA keyword ability that changes combat damage timing.",
+            related_rule_ids=["702.7"],
+            document_type="glossary",
+            section_id="",
+        ),
+        make_chunk(
             "rule:510:1",
             rule_ids=["510"],
             root_rule_id="510",
@@ -116,17 +136,17 @@ def test_root_lookup_returns_all_root_partitions():
 
 
 def test_explicit_rule_id_is_ranked_first():
-    evidence = build_knowledge_base().search("What does rule 702.49a mean?", top_k=3)
+    evidence = build_knowledge_base().search("What does rule 702.49a say about ninjutsu?", top_k=3)
 
     assert evidence[0].chunk_id == "rule:702.49:1"
     assert evidence[0].retrieval_methods == ["exact"]
 
 
 def test_hybrid_retrieval_reports_contributing_methods():
-    evidence = build_knowledge_base().search("first strike", top_k=2)
-    first_strike = next(item for item in evidence if item.root_rule_id == "702.7")
+    evidence = build_knowledge_base().search("combat damage", top_k=3)
+    combat_damage = next(item for item in evidence if item.root_rule_id == "510")
 
-    assert first_strike.retrieval_methods == ["lexical", "semantic", "hybrid"]
+    assert combat_damage.retrieval_methods == ["lexical", "semantic", "hybrid"]
 
 
 def test_fake_multilingual_semantic_retrieval_is_injectable():
@@ -136,12 +156,45 @@ def test_fake_multilingual_semantic_retrieval_is_injectable():
     assert "semantic" in evidence[0].retrieval_methods
 
 
-def test_glossary_expands_one_hop_to_related_rule_without_duplicates():
-    evidence = build_knowledge_base().search("Ninjutsu", top_k=3)
+def test_natural_language_term_anchors_rule_before_supporting_glossary():
+    evidence = build_knowledge_base().search("How does ninjutsu work?", top_k=3)
 
-    assert evidence[0].document_type == "glossary"
-    assert evidence[1].root_rule_id == "702.49"
-    assert evidence[1].retrieval_methods == ["glossary_expansion"]
+    assert evidence[0].root_rule_id == "702.49"
+    assert evidence[0].retrieval_methods == ["terminology", "glossary_expansion"]
+    assert evidence[1].term == "Ninjutsu"
+    assert evidence[1].retrieval_methods == ["terminology", "exact"]
+    assert all(item.term != "Commander Ninjutsu" for item in evidence[:2])
+
+
+def test_spanish_sentence_anchors_embedded_english_game_term():
+    evidence = build_knowledge_base().search("¿Cómo funciona ninjutsu?", top_k=2)
+
+    assert [item.root_rule_id or item.term for item in evidence] == ["702.49", "Ninjutsu"]
+
+
+def test_longest_overlapping_glossary_term_wins():
+    evidence = build_knowledge_base().search("Explain commander ninjutsu", top_k=2)
+
+    assert evidence[0].root_rule_id == "702.49"
+    assert evidence[1].term == "Commander Ninjutsu"
+
+
+def test_first_strike_phrase_anchors_related_rule():
+    evidence = build_knowledge_base().search("How does first strike work?", top_k=2)
+
+    assert evidence[0].root_rule_id == "702.7"
+    assert evidence[1].term == "First Strike"
+
+
+def test_glossary_anchor_requires_complete_tokens():
+    evidence = build_knowledge_base().search("Are ninjutsus different?", top_k=3)
+
+    assert all("terminology" not in item.retrieval_methods for item in evidence)
+
+
+def test_glossary_expansion_does_not_duplicate_evidence():
+    evidence = build_knowledge_base().search("Ninjutsu", top_k=5)
+
     assert len({item.chunk_id for item in evidence}) == len(evidence)
 
 

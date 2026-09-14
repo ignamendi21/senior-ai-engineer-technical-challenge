@@ -15,7 +15,14 @@ from magic_assistant.rules.index import DenseRuleIndex, RuleIndexError
 DEFAULT_RRF_CONSTANT = 60
 _RULE_ID_RE = re.compile(r"(?<![\d.])\d{3}(?:\.\d+)*(?:[a-z])?(?![\d.])", re.IGNORECASE)
 _TOKEN_RE = re.compile(r"\d{3}(?:\.\d+)*(?:[a-z])?|[^\W_]+(?:[-'][^\W_]+)*", re.UNICODE)
-RetrievalMethod = Literal["exact", "lexical", "semantic", "hybrid", "glossary_expansion"]
+RetrievalMethod = Literal[
+    "exact",
+    "terminology",
+    "lexical",
+    "semantic",
+    "hybrid",
+    "glossary_expansion",
+]
 
 
 class RuleEvidence(BaseModel):
@@ -83,6 +90,7 @@ class RulesKnowledgeBase:
         self._root_index: dict[str, list[str]] = defaultdict(list)
         self._section_index: dict[str, list[str]] = defaultdict(list)
         self._term_index: dict[str, list[str]] = defaultdict(list)
+        self._term_tokens: dict[tuple[str, ...], str] = {}
         for chunk in self._chunks:
             for rule_id in chunk.rule_ids:
                 self._rule_index[rule_id].append(chunk.chunk_id)
@@ -91,7 +99,9 @@ class RulesKnowledgeBase:
             if chunk.section_id and chunk.document_type == "rule":
                 self._section_index[chunk.section_id].append(chunk.chunk_id)
             if chunk.term:
-                self._term_index[self._normalize_term(chunk.term)].append(chunk.chunk_id)
+                normalized_term = self._normalize_term(chunk.term)
+                self._term_index[normalized_term].append(chunk.chunk_id)
+                self._term_tokens[tuple(tokenize(normalized_term))] = normalized_term
 
     @property
     def chunk_count(self) -> int:
@@ -150,16 +160,58 @@ class RulesKnowledgeBase:
         matches: list[RuleEvidence] = []
         seen: set[str] = set()
         for rule_id in _RULE_ID_RE.findall(query):
-            for evidence in self.get_rule(rule_id):
-                if evidence.chunk_id not in seen:
-                    matches.append(evidence)
-                    seen.add(evidence.chunk_id)
-        term_chunk_ids = self._term_index.get(self._normalize_term(query), [])
-        for chunk_id in term_chunk_ids:
-            if chunk_id not in seen:
-                matches.append(self._to_evidence(self._chunk_by_id[chunk_id], 1.0, ["exact"]))
-                seen.add(chunk_id)
+            self._append_unique(matches, seen, self.get_rule(rule_id))
+
+        for glossary_chunk_id in self._matched_glossary_chunks(query):
+            glossary_chunk = self._chunk_by_id[glossary_chunk_id]
+            related = [
+                evidence.model_copy(
+                    update={"retrieval_methods": ["terminology", "glossary_expansion"]}
+                )
+                for rule_id in glossary_chunk.related_rule_ids
+                for evidence in self.get_rule(rule_id)
+            ]
+            if related:
+                self._append_unique(matches, seen, related[:1])
+            glossary = self._to_evidence(glossary_chunk, 1.0, ["terminology", "exact"])
+            self._append_unique(matches, seen, [glossary])
+            self._append_unique(matches, seen, related[1:])
         return matches
+
+    def _matched_glossary_chunks(self, query: str) -> list[str]:
+        query_tokens = tokenize(self._normalize_term(query))
+        candidates: list[tuple[int, int, str]] = []
+        for term_tokens, normalized_term in self._term_tokens.items():
+            if not term_tokens or len(term_tokens) > len(query_tokens):
+                continue
+            width = len(term_tokens)
+            for start in range(len(query_tokens) - width + 1):
+                if tuple(query_tokens[start : start + width]) == term_tokens:
+                    candidates.append((start, start + width, normalized_term))
+
+        if not candidates:
+            return []
+        _, _, normalized_term = min(
+            candidates,
+            key=lambda item: (
+                -(item[1] - item[0]),
+                -len(item[2]),
+                item[0],
+                item[2],
+            ),
+        )
+        return self._term_index[normalized_term]
+
+    @staticmethod
+    def _append_unique(
+        matches: list[RuleEvidence],
+        seen: set[str],
+        evidence_items: Sequence[RuleEvidence],
+    ) -> None:
+        for evidence in evidence_items:
+            if evidence.chunk_id not in seen:
+                matches.append(evidence)
+                seen.add(evidence.chunk_id)
 
     def _lexical_ranking(self, query: str, limit: int) -> list[str]:
         scores = self._bm25.get_scores(tokenize(query))
