@@ -1,0 +1,35 @@
+[project]
+name = "improved-rag-reference"
+version = "0.1.0"
+description = "Compact reference rewrite for the Part 2 code review"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "chromadb==1.5.9",
+    "numpy==2.5.2",
+    "openai==3.8.0",
+    "pydantic>=2.12.5,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2,<10",
+    "ruff>=0.14.10,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["improved"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = ["original.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
