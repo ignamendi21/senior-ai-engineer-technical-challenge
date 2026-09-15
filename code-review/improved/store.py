@@ -26,10 +26,14 @@ class ChromaVectorStore:
         persistence_directory: Path,
         collection_name: str,
         embedding_model: str,
+        chunk_size: int,
+        chunk_overlap: int,
     ) -> None:
         expected_metadata = {
             "embedding_model": embedding_model,
             "index_schema_version": INDEX_SCHEMA_VERSION,
+            "chunk_size": chunk_size,
+            "chunk_overlap": chunk_overlap,
         }
         try:
             self._client = chromadb.PersistentClient(

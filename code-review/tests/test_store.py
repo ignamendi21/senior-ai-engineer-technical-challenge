@@ -6,6 +6,10 @@ from improved.models import DocumentChunk, SourceDocument
 from improved.store import ChromaVectorStore
 
 
+def make_store(path, model: str = "embedding-v1", chunk_size: int = 100) -> ChromaVectorStore:
+    return ChromaVectorStore(path, "docs", model, chunk_size, 10)
+
+
 def make_chunk(identifier: str, index: int, text: str) -> DocumentChunk:
     return DocumentChunk(
         chunk_id=identifier,
@@ -40,11 +44,11 @@ def test_chroma_persists_idempotent_upserts_and_provenance(tmp_path):
         make_chunk("chunk-a", 0, "alpha reference"),
         make_chunk("chunk-b", 1, "beta reference"),
     ]
-    store = ChromaVectorStore(tmp_path, "docs", "embedding-v1")
+    store = make_store(tmp_path)
     store.upsert(chunks, [[1.0, 0.0], [0.0, 1.0]])
     store.upsert(chunks, [[1.0, 0.0], [0.0, 1.0]])
 
-    reopened = ChromaVectorStore(tmp_path, "docs", "embedding-v1")
+    reopened = make_store(tmp_path)
     results = reopened.search([1.0, 0.0], top_k=2)
 
     assert len(results) == 2
@@ -55,7 +59,15 @@ def test_chroma_persists_idempotent_upserts_and_provenance(tmp_path):
 
 def test_chroma_rejects_embedding_model_mismatch(tmp_path):
     chunk = make_chunk("chunk-a", 0, "alpha reference")
-    ChromaVectorStore(tmp_path, "docs", "embedding-v1").upsert([chunk], [[1.0, 0.0]])
+    make_store(tmp_path).upsert([chunk], [[1.0, 0.0]])
 
     with pytest.raises(IncompatibleIndexError, match="incompatible"):
-        ChromaVectorStore(tmp_path, "docs", "embedding-v2")
+        make_store(tmp_path, model="embedding-v2")
+
+
+def test_chroma_rejects_chunking_configuration_mismatch(tmp_path):
+    chunk = make_chunk("chunk-a", 0, "alpha reference")
+    make_store(tmp_path).upsert([chunk], [[1.0, 0.0]])
+
+    with pytest.raises(IncompatibleIndexError, match="incompatible"):
+        make_store(tmp_path, chunk_size=200)

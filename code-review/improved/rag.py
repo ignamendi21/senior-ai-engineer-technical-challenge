@@ -173,6 +173,8 @@ def build_openai_rag(settings: RagSettings | None = None) -> RagService:
         settings.persistence_directory,
         settings.collection_name,
         settings.embedding_model,
+        settings.chunk_size,
+        settings.chunk_overlap,
     )
     chat = OpenAIChatProvider(client, settings.chat_model)
     history = InMemorySessionHistory(settings.max_history_turns)
