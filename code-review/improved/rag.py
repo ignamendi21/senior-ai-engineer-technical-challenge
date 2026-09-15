@@ -64,11 +64,11 @@ class RagService:
         query = query.strip()
         if not query:
             raise ValueError("query must not be blank")
-        top_k = top_k or self._settings.default_top_k
-        if not 1 <= top_k <= self._settings.max_top_k:
+        effective_top_k = self._settings.default_top_k if top_k is None else top_k
+        if not 1 <= effective_top_k <= self._settings.max_top_k:
             raise ValueError(f"top_k must be between 1 and {self._settings.max_top_k}")
         query_embedding = self._embeddings.embed_query(query)
-        return self._store.search(query_embedding, top_k)
+        return self._store.search(query_embedding, effective_top_k)
 
     def ask(self, question: str, *, session_id: str, top_k: int | None = None) -> RagAnswer:
         question = question.strip()

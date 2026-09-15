@@ -209,12 +209,22 @@ def test_empty_inputs_and_invalid_top_k_are_rejected():
 
     with pytest.raises(ValueError, match="query"):
         rag.search("   ")
-    with pytest.raises(ValueError, match="top_k"):
-        rag.search("question", top_k=6)
+    for invalid_top_k in (0, -1, 6):
+        with pytest.raises(ValueError, match="top_k"):
+            rag.search("question", top_k=invalid_top_k)
     with pytest.raises(ValueError, match="question"):
         rag.ask("", session_id="session")
     with pytest.raises(ValueError, match="documents"):
         rag.ingest_documents([])
+
+
+def test_none_uses_default_top_k_and_valid_explicit_value_is_unchanged():
+    rag, _, store, _, _ = service()
+
+    rag.search("default", top_k=None)
+    rag.search("explicit", top_k=4)
+
+    assert store.top_k_calls == [3, 4]
 
 
 def test_no_retrieval_returns_controlled_answer_without_calling_chat():
