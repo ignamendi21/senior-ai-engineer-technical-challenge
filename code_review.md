@@ -190,7 +190,7 @@ deterministic ID validation -> RagAnswer + SourceCitation[]
 - `SessionHistory`: isolated bounded turns.
 - `RagService`: orchestration only.
 
-Most tests use in-memory fakes. One focused test exercises real local Chroma persistence and compatibility behavior.
+Most tests use in-memory fakes. Focused tests exercise real local Chroma persistence and compatibility behavior.
 
 ## Senior-level design decisions
 

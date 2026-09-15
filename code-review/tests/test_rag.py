@@ -178,6 +178,22 @@ def test_context_is_bounded():
     assert included[0].chunk_id == "chunk-a"
 
 
+def test_model_can_return_controlled_insufficient_answer_without_sources():
+    store = FakeStore()
+    store.search_results = [retrieved_chunk()]
+    generated = GeneratedAnswer(
+        text="The retrieved material is insufficient to answer.",
+        used_chunk_ids=[],
+    )
+    rag, _, _, _, history = service(store=store, generated=generated)
+
+    answer = rag.ask("Unsupported question", session_id="session")
+
+    assert answer.text == "The retrieved material is insufficient to answer."
+    assert answer.sources == []
+    assert len(history.get("session")) == 1
+
+
 def test_unknown_model_source_id_is_rejected():
     store = FakeStore()
     store.search_results = [retrieved_chunk()]

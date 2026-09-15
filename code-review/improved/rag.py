@@ -91,8 +91,6 @@ class RagService:
         unknown_ids = set(generated.used_chunk_ids) - set(available)
         if unknown_ids:
             raise GenerationError("Generated answer selected unknown source IDs")
-        if not generated.used_chunk_ids:
-            raise GenerationError("Generated answer did not select any source IDs")
         citations = [
             SourceCitation(
                 chunk_id=chunk.chunk_id,
