@@ -1,10 +1,10 @@
 # 1. Executive Summary
 
-The proposal is an internal clinical decision-support assistant for a medium private clinic with approximately 80 healthcare professionals. It will let an authorized doctor ask questions about the clinic's approved clinical protocols, optionally add the minimum necessary patient context, and receive a concise answer with visible protocol version, page, and source citations. Where a question requires dosage or another critical calculation, tested deterministic code—not the language model—will perform the arithmetic.
+The proposal is an internal clinical decision-support assistant for a medium private clinic with approximately 80 healthcare professionals. It will let an authorized doctor ask questions about the clinic's approved clinical protocols, optionally add the minimum necessary patient context, and receive a concise answer with visible protocol version, page, and source citations. Tested deterministic code—not the language model—will perform critical calculations, and a separate local clinical ML service will provide structured ECG pre-assessment when ECG data is involved.
 
 For the Medical Director, the main value is faster access to the clinic's current guidance without replacing clinical judgment. The assistant can reduce time spent searching across roughly 80 protocol PDFs, dosage tables, images, Word patient records, and selected MySQL data. It will explicitly abstain when evidence is insufficient, show the material used, and keep diagnosis, prescription, and treatment accountability with the clinician.
 
-For the Principal AI Engineer, the design separates three trust domains: shared clinical knowledge, authorized patient context, and deterministic calculations. A single locally hosted open-weight LLM explains retrieved evidence; PostgreSQL with pgvector stores protocol embeddings; a structured catalog handles clinically validated dosage rules; and source validation ensures citations come from retrieved metadata rather than model invention. Patient records are fetched on demand and are not copied into the shared protocol vector index.
+For the Principal AI Engineer, the design separates shared clinical knowledge, authorized patient context, deterministic calculations, and specialized ECG pre-assessment. A single locally hosted open-weight LLM explains structured evidence; PostgreSQL with pgvector stores protocol embeddings; a validated catalog handles dosage rules; and source validation ensures citations come from metadata rather than model invention. Patient records and ECG data are fetched on demand and are not copied into the shared protocol vector index.
 
 All patient and clinical data remains inside clinic-controlled infrastructure: documents, embeddings, database records, prompts, responses, calculations, and LLM inference. This directly addresses the data-residency constraint and supports privacy-by-design and the clinic's GDPR obligations without claiming that technology alone establishes compliance.
 
@@ -22,9 +22,11 @@ flowchart TB
         subgraph Patient ["PATIENT DATA — LOCAL"]
             MySQL[("MySQL patient data")]
             Word["Word patient records"]
+            ECGData["Raw/structured ECG waveform data<br/>preferred where available"]
             PatientAccess["Authorized, read-only patient context adapter<br/>on-demand and minimized"]
             MySQL --> PatientAccess
             Word --> PatientAccess
+            ECGData --> PatientAccess
         end
 
         subgraph Knowledge ["CLINICAL KNOWLEDGE — LOCAL"]
@@ -46,16 +48,21 @@ flowchart TB
             Retrieval["Protocol retrieval"]
             PatientContext["Optional minimized patient context"]
             Calculation["Optional deterministic calculation<br/>units, ranges, limits, rounding"]
-            LLM["One locally hosted open-weight LLM"]
+            ECGService["ECG Pre-assessment Service<br/>specialized local clinical ML"]
+            ECGResult["Structured pre-assessment<br/>findings, urgency indicators, input quality"]
+            LLM["One locally hosted open-weight LLM<br/>explains evidence; does not diagnose ECGs"]
             Validation["Deterministic source and citation validation"]
             Answer["Final answer with protocol version, page,<br/>calculation details and abstention when needed"]
 
             Doctor -->|"clinical question"| Auth
             Auth --> Backend
             Backend --> Retrieval
+            Backend -->|"when request involves ECG data"| ECGService
             Retrieval --> PatientContext
             PatientContext --> Calculation
             Calculation --> LLM
+            ECGService --> ECGResult
+            ECGResult --> LLM
             LLM --> Validation
             Validation --> Answer
             Answer --> Doctor
@@ -65,7 +72,9 @@ flowchart TB
         Images --> Retrieval
         Tables --> Calculation
         PatientAccess -->|"only when authorized and needed"| PatientContext
+        PatientAccess -->|"authorized ECG waveform"| ECGService
         Boundary --- MySQL
+        Boundary --- ECGData
         Boundary --- PDFs
         Boundary --- Doctor
     end
@@ -81,9 +90,9 @@ flowchart TB
     Backend -. "non-sensitive availability metrics only" .-> Monitoring
 ```
 
-The doctor-question path is explicit: doctor → authorization → protocol retrieval → optional patient context → optional deterministic calculation → local LLM → source/citation validation → final answer. Authorization is enforced before patient access and never delegated to the LLM. Patient context is minimized for the question and kept separate from the shared clinical knowledge index.
+The doctor-question path is explicit: doctor → authorization → protocol retrieval → optional patient context → optional deterministic calculation or ECG pre-assessment → local LLM explanation → source/citation validation → final answer. Authorization is enforced before patient access and never delegated to the LLM. Patient and ECG context is minimized for the question and kept separate from the shared clinical knowledge index.
 
-**Must remain local:** MySQL and Word patient data, protocol PDFs and extracted images, dosage catalog, embeddings, PostgreSQL/pgvector, prompts and responses containing clinical information, calculations, and all LLM inference.
+**Must remain local:** MySQL and Word patient data, raw/structured ECG waveforms and pre-assessment results, protocol PDFs and extracted images, dosage catalog, embeddings, PostgreSQL/pgvector, prompts and responses containing clinical information, calculations, specialized ECG inference, and all LLM inference.
 
 **May use cloud if clinic policy permits and no sensitive data is included:** source-code repository and CI, signed software update distribution, and infrastructure monitoring limited to non-sensitive health/capacity signals. External LLM APIs are not used for clinical workloads.
 
@@ -100,7 +109,7 @@ Protocols updated every 3–6 months enter a controlled workflow: ingest a candi
 | Tool for doctor calculations | A local deterministic calculation engine with versioned formulas, typed inputs/units, range and contraindication checks, controlled rounding, and clinician-approved test cases. | The LLM may identify and explain a calculation, but critical arithmetic must be reproducible and tested. Results always show inputs, units, formula/version and required clinician review. |
 | User interface | A simple internal browser application integrated with clinic authentication and RBAC. | Doctors need no workstation installation; centralized updates and support reduce operational burden. The interface can show answers, citations, original pages/images and calculation details consistently. |
 
-An optional specialized local ECG pre-assessment component could be integrated later if clinically required, but it would have its own validation, intended-use boundary and workflow. It is not a reason to introduce multiple general-purpose agents or model weights into the initial solution.
+The proposed capability includes a specialized local ECG pre-assessment service, isolated from the general LLM and validated for its defined clinical use. It should prefer raw/structured waveform data where available and return structured findings, urgency indicators and input-quality information; the LLM may explain that output but does not diagnose the ECG. Results remain decision support and require clinician review.
 
 # 4. What the System Will NOT Do
 
