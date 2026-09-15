@@ -2,7 +2,9 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
+from pydantic import BaseModel
 
+from magic_assistant.agent.schemas import RequestIntent
 from magic_assistant.api.schemas import (
     CardSource,
     ChatResponse,
@@ -16,6 +18,12 @@ _ALLOWED_IMAGE_HOSTS = {"gatherer.wizards.com"}
 
 class DemoApiError(RuntimeError):
     pass
+
+
+class ResponsePresentation(BaseModel):
+    answer_text: str | None
+    card_heading: str | None
+    show_custom_card: bool
 
 
 class DemoApiClient:
@@ -74,6 +82,36 @@ def valid_image_url(value: str | None) -> bool:
     )
 
 
+def response_presentation(response: ChatResponse) -> ResponsePresentation:
+    if response.custom_card is not None:
+        return ResponsePresentation(
+            answer_text=None,
+            card_heading=None,
+            show_custom_card=True,
+        )
+    if response.intent == RequestIntent.CARD_SEARCH and response.cards:
+        return ResponsePresentation(
+            answer_text=None,
+            card_heading="Cards found",
+            show_custom_card=False,
+        )
+    answer = strip_generated_source_block(response.answer, response.sources)
+    return ResponsePresentation(
+        answer_text=answer,
+        card_heading=None,
+        show_custom_card=False,
+    )
+
+
+def strip_generated_source_block(answer: str, sources: list[PublicSource]) -> str:
+    if not sources:
+        return answer
+    expected_block = "\n\nSources:\n" + "\n".join(
+        f"- {_rendered_answer_source_label(source)}" for source in sources
+    )
+    return answer.removesuffix(expected_block).rstrip()
+
+
 def source_label(source: PublicSource) -> str:
     if isinstance(source, RuleSource):
         pages = _pages(source.page_start, source.page_end)
@@ -96,6 +134,12 @@ def technical_details(response: ChatResponse) -> dict[str, object]:
         "sources": [source_label(source) for source in response.sources],
         "request_id": response.request_id,
     }
+
+
+def _rendered_answer_source_label(source: PublicSource) -> str:
+    if isinstance(source, CardSource):
+        return f"{source.name} — MTG card API"
+    return source_label(source)
 
 
 def _pages(page_start: int, page_end: int) -> str:

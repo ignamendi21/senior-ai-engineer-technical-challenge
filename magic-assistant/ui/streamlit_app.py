@@ -8,6 +8,7 @@ from magic_assistant.ui.client import (
     DemoApiClient,
     DemoApiError,
     new_thread_id,
+    response_presentation,
     source_label,
     technical_details,
     valid_image_url,
@@ -41,10 +42,34 @@ with st.sidebar:
     st.caption(f"Thread: {st.session_state.thread_id}")
 
 
+def render_structured_custom_card(response: ChatResponse) -> None:
+    card = response.custom_card
+    if card is None:
+        return
+    st.warning(CUSTOM_CARD_NOTICE)
+    st.subheader(card.name)
+    if card.mana_cost:
+        st.write(f"Mana cost: {card.mana_cost}")
+    if card.colors:
+        st.write(f"Colors: {''.join(color.value for color in card.colors)}")
+    st.write(f"Type: {card.type_line}")
+    st.write(card.oracle_text)
+    if card.power is not None:
+        st.write(f"Power: {card.power}")
+    if card.toughness is not None:
+        st.write(f"Toughness: {card.toughness}")
+    if card.flavor_text:
+        st.caption(card.flavor_text)
+
+
 def render_response(response: ChatResponse) -> None:
-    if response.custom_card:
-        st.warning(CUSTOM_CARD_NOTICE)
-    st.markdown(response.answer)
+    presentation = response_presentation(response)
+    if presentation.show_custom_card:
+        render_structured_custom_card(response)
+    if presentation.answer_text:
+        st.markdown(presentation.answer_text)
+    if presentation.card_heading:
+        st.markdown(f"**{presentation.card_heading}**")
     for card in response.cards:
         st.subheader(card.name)
         st.caption(

@@ -5,7 +5,9 @@ from magic_assistant.api.schemas import ChatResponse, RuleSource
 from magic_assistant.ui.client import (
     DemoApiClient,
     DemoApiError,
+    response_presentation,
     source_label,
+    strip_generated_source_block,
     technical_details,
     valid_image_url,
 )
@@ -44,6 +46,92 @@ def test_response_parsing_and_technical_details_are_pure():
         "sources": ["Magic Comprehensive Rules 2026-04-17 — rule 509.1h — PDF p. 111-112"],
         "request_id": "request-1",
     }
+
+
+def test_grounded_answer_strips_only_matching_generated_trailing_sources():
+    response = ChatResponse.model_validate(response_payload())
+    answer = (
+        "Grounded body.\n\nSources:\n"
+        "- Magic Comprehensive Rules 2026-04-17 — rule 509.1h — PDF p. 111-112"
+    )
+
+    assert strip_generated_source_block(answer, response.sources) == "Grounded body."
+
+
+def test_ordinary_sources_word_is_not_truncated():
+    response = ChatResponse.model_validate(response_payload())
+    answer = "Sources of mana are discussed here, but this is ordinary prose."
+
+    assert strip_generated_source_block(answer, response.sources) == answer
+
+
+def test_structured_card_search_suppresses_textual_enumeration():
+    payload = response_payload()
+    payload["intent"] = "card_search"
+    payload["answer"] = "Cards found:\n- Duplicate textual card"
+    payload["sources"] = []
+    payload["cards"] = [
+        {
+            "id": "card-1",
+            "name": "Test Warrior",
+            "mana_cost": "{W}",
+            "mana_value": 1,
+            "colors": ["W"],
+            "type_line": "Creature — Human Warrior",
+            "oracle_text": "Vigilance",
+            "set_code": "TST",
+            "image_url": None,
+        }
+    ]
+    response = ChatResponse.model_validate(payload)
+
+    presentation = response_presentation(response)
+
+    assert presentation.answer_text is None
+    assert presentation.card_heading == "Cards found"
+    assert response.cards[0].name == "Test Warrior"
+
+
+def test_empty_card_search_preserves_no_results_message():
+    payload = response_payload()
+    payload.update(
+        intent="card_search",
+        answer="No cards matched those filters.",
+        sources=[],
+        cards=[],
+    )
+    response = ChatResponse.model_validate(payload)
+
+    presentation = response_presentation(response)
+
+    assert presentation.answer_text == "No cards matched those filters."
+    assert presentation.card_heading is None
+
+
+def test_custom_card_uses_one_structured_warning_and_preserves_fields():
+    payload = response_payload()
+    payload["intent"] = "custom_card"
+    payload["answer"] = "CUSTOM / FAN-MADE — NOT AN OFFICIAL MAGIC CARD\n\nDuplicate text"
+    payload["sources"] = []
+    payload["custom_card"] = {
+        "name": "Han Solo, Daring Captain",
+        "mana_cost": "{1}{R}{W}",
+        "colors": ["R", "W"],
+        "type_line": "Legendary Creature — Human Rogue",
+        "oracle_text": "First strike",
+        "power": "3",
+        "toughness": "2",
+        "flavor_text": "Never tell me the odds.",
+    }
+    response = ChatResponse.model_validate(payload)
+
+    presentation = response_presentation(response)
+
+    assert presentation.show_custom_card
+    assert presentation.answer_text is None
+    assert response.custom_card.name == "Han Solo, Daring Captain"
+    assert response.custom_card.oracle_text == "First strike"
+    assert response.custom_card.flavor_text == "Never tell me the odds."
 
 
 def test_source_label_and_image_validation():
