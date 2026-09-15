@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Legacy RAG Helper — Before / After",
+    "subtitle": "From one global script to compact, testable dependency boundaries",
+    "output": "code-review-before-after.html",
+    "animation": "none",
+    "visual_preset": "editorial",
+    "quality_profile": "standard",
+    "viewBox": [2000, 1120],
+    "views": [
+      {"id": "before", "label": "Before", "focus": ["original", "hardcoded-key", "legacy-openai", "memory-chroma", "history-file"], "note": "One imported script owns secrets, providers, retrieval, prompting, generation and global persistence."},
+      {"id": "after", "label": "After", "focus": ["rag-service", "chunking", "embedding-provider", "vector-store", "chat-provider", "session-history", "citations"], "note": "Small protocols separate change reasons and make offline tests possible."}
+    ]
+  },
+  "components": [
+    {"id": "hardcoded-key", "type": "security", "label": "Hard-coded API key", "sublabel": "module-level secret", "pos": [60, 90], "size": [170, 64], "tag": "critical"},
+    {"id": "original", "type": "backend", "label": "original.py", "sublabel": "global client + collection", "pos": [300, 180], "size": [190, 74]},
+    {"id": "ingest-fn", "type": "backend", "label": "ingest_documents", "sublabel": "whole docs · one request each", "pos": [80, 350], "size": [190, 68]},
+    {"id": "ask-fn", "type": "backend", "label": "ask", "sublabel": "retrieve + prompt + generate", "pos": [320, 350], "size": [190, 68]},
+    {"id": "legacy-openai", "type": "external", "label": "Legacy OpenAI APIs", "sublabel": "fixed models · no timeout policy", "pos": [560, 560], "size": [190, 70]},
+    {"id": "memory-chroma", "type": "database", "label": "In-memory Chroma", "sublabel": "create_collection at import", "pos": [80, 560], "size": [190, 70]},
+    {"id": "system-context", "type": "security", "label": "Retrieved text in system prompt", "sublabel": "untrusted data gains privilege", "pos": [560, 350], "size": [205, 72], "tag": "prompt injection"},
+    {"id": "history-file", "type": "database", "label": "history.json", "sublabel": "global plaintext overwrite", "pos": [320, 560], "size": [190, 70]},
+
+    {"id": "source-docs", "type": "external", "label": "SourceDocument", "sublabel": "source ID + metadata", "pos": [920, 80], "size": [170, 64]},
+    {"id": "chunking", "type": "backend", "label": "Deterministic chunking", "sublabel": "overlap + SHA-256 stable IDs", "pos": [1160, 80], "size": [200, 68]},
+    {"id": "rag-service", "type": "backend", "label": "RagService", "sublabel": "small orchestration facade", "pos": [1160, 350], "size": [190, 72]},
+    {"id": "embedding-provider", "type": "backend", "label": "EmbeddingProvider", "sublabel": "batch documents + query", "pos": [900, 540], "size": [185, 68]},
+    {"id": "vector-store", "type": "database", "label": "VectorStore", "sublabel": "idempotent upsert + retrieval", "pos": [1120, 540], "size": [185, 68]},
+    {"id": "chat-provider", "type": "backend", "label": "ChatProvider", "sublabel": "structured answer draft", "pos": [1340, 650], "size": [180, 68]},
+    {"id": "session-history", "type": "database", "label": "SessionHistory", "sublabel": "bounded + isolated by session_id", "pos": [1600, 500], "size": [190, 68]},
+    {"id": "openai-current", "type": "external", "label": "Current OpenAI client", "sublabel": "environment models · timeout/retries", "pos": [900, 750], "size": [200, 70]},
+    {"id": "persistent-chroma", "type": "database", "label": "Persistent Chroma", "sublabel": "model + chunk config compatibility", "pos": [1130, 750], "size": [210, 70]},
+    {"id": "untrusted-reference", "type": "security", "label": "Untrusted reference block", "sublabel": "data separated from system policy", "pos": [1340, 500], "size": [205, 70]},
+    {"id": "citations", "type": "security", "label": "Validated source IDs", "sublabel": "deterministic SourceCitation", "pos": [1590, 650], "size": [180, 70]}
+  ],
+  "boundaries": [
+    {"kind": "region", "label": "BEFORE — one script, global mutable state", "wraps": ["hardcoded-key", "original", "ingest-fn", "ask-fn", "legacy-openai", "memory-chroma", "system-context", "history-file"], "pad": 35},
+    {"kind": "region", "label": "AFTER — compact dependency-injected reference", "wraps": ["source-docs", "chunking", "rag-service", "embedding-provider", "vector-store", "chat-provider", "session-history", "openai-current", "persistent-chroma", "untrusted-reference", "citations"], "pad": 35}
+  ],
+  "connections": [
+    {"from": "hardcoded-key", "to": "original", "variant": "security"},
+    {"from": "original", "to": "ingest-fn", "variant": "default"},
+    {"from": "original", "to": "ask-fn", "fromSide": "bottom", "toSide": "top", "variant": "default"},
+    {"from": "ingest-fn", "to": "memory-chroma", "variant": "dashed"},
+    {"from": "ask-fn", "to": "system-context", "variant": "security"},
+    {"from": "system-context", "to": "legacy-openai", "fromSide": "bottom", "toSide": "top", "variant": "security"},
+    {"from": "ask-fn", "to": "history-file", "variant": "security"},
+    {"from": "source-docs", "to": "chunking", "variant": "emphasis"},
+    {"from": "chunking", "to": "rag-service", "fromSide": "bottom", "toSide": "top", "variant": "emphasis"},
+    {"from": "rag-service", "to": "embedding-provider", "variant": "default"},
+    {"from": "rag-service", "to": "vector-store", "fromSide": "bottom", "toSide": "top", "variant": "default"},
+    {"from": "rag-service", "to": "untrusted-reference", "fromSide": "bottom", "toSide": "top", "variant": "security"},
+    {"from": "rag-service", "to": "session-history", "fromSide": "right", "toSide": "left", "variant": "default"},
+    {"from": "embedding-provider", "to": "openai-current", "fromSide": "bottom", "toSide": "top", "variant": "emphasis"},
+    {"from": "vector-store", "to": "persistent-chroma", "fromSide": "bottom", "toSide": "top", "variant": "emphasis"},
+    {"from": "untrusted-reference", "to": "chat-provider", "fromSide": "bottom", "toSide": "top", "variant": "security"},
+    {"from": "chat-provider", "to": "citations", "variant": "security"}
+  ],
+  "cards": [
+    {"dot": "rose", "title": "Why the original is risky", "items": ["Untrusted data is promoted to system instructions", "Secrets and mutable clients live at module scope", "History and vector data have no safe lifecycle"]},
+    {"dot": "cyan", "title": "Why the boundaries exist", "items": ["Each provider can be replaced or faked independently", "RagService coordinates policy instead of owning SDK details", "Typed models preserve provenance across every step"]},
+    {"dot": "emerald", "title": "Still intentionally small", "items": ["No web framework, agent graph or distributed platform", "In-memory history is bounded but not durable", "Hybrid retrieval and reranking require evaluation before addition"]}
+  ]
+}

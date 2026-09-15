@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Magic Assistant — Implemented Architecture",
+    "subtitle": "Approved Part 1 runtime, deterministic tools, grounding, and memory",
+    "output": "magic-assistant-architecture.html",
+    "animation": "trace",
+    "visual_preset": "blueprint",
+    "quality_profile": "standard",
+    "viewBox": [1900, 1160],
+    "views": [
+      {
+        "id": "request-path",
+        "label": "Request path",
+        "focus": ["streamlit", "fastapi", "runtime", "planner", "rules-node", "generation", "validation", "render"],
+        "note": "Follow one grounded request through the explicit runtime and graph nodes."
+      },
+      {
+        "id": "rules-side",
+        "label": "Rules knowledge",
+        "focus": ["rules-pdf", "ingestion", "persisted-index", "hybrid", "rule-evidence", "rules-node"],
+        "note": "See how the PDF becomes deterministic RuleEvidence before generation."
+      },
+      {
+        "id": "card-side",
+        "label": "Card data",
+        "focus": ["card-api", "card-service", "card-search", "resolve-cards"],
+        "note": "Card data stays behind the typed deterministic service boundary."
+      }
+    ]
+  },
+  "components": [
+    {"id": "streamlit", "type": "frontend", "label": "Streamlit UI", "sublabel": "thin FastAPI client", "pos": [40, 390], "size": [150, 66]},
+    {"id": "fastapi", "type": "backend", "label": "FastAPI", "sublabel": "POST /api/chat", "pos": [240, 390], "size": [150, 66]},
+    {"id": "runtime", "type": "backend", "label": "LiveAssistantRuntime", "sublabel": "shared process resources", "pos": [440, 390], "size": [170, 70]},
+    {"id": "planner", "type": "backend", "label": "plan_request", "sublabel": "typed intent + routing", "pos": [650, 480], "size": [160, 64]},
+    {"id": "rules-node", "type": "backend", "label": "retrieve_rules", "sublabel": "rules question route", "pos": [880, 300], "size": [160, 64]},
+    {"id": "card-search", "type": "backend", "label": "search_cards", "sublabel": "typed filters", "pos": [880, 420], "size": [160, 64]},
+    {"id": "resolve-cards", "type": "backend", "label": "resolve_named_cards", "sublabel": "exact normalized name first", "pos": [880, 540], "size": [170, 68]},
+    {"id": "custom-card", "type": "backend", "label": "custom-card route", "sublabel": "mechanics + structured draft", "pos": [880, 660], "size": [170, 68]},
+    {"id": "generation", "type": "backend", "label": "grounded generation", "sublabel": "structured source references", "pos": [1130, 360], "size": [175, 68]},
+    {"id": "validation", "type": "security", "label": "source validation", "sublabel": "allowlist + bounded retry", "pos": [1370, 360], "size": [170, 68]},
+    {"id": "render", "type": "backend", "label": "response rendering", "sublabel": "answer, cards, citations", "pos": [1600, 420], "size": [170, 68]},
+    {"id": "memory", "type": "database", "label": "LangGraph checkpointer", "sublabel": "thread_id · InMemorySaver", "pos": [420, 610], "size": [190, 70]},
+    {"id": "chat-model", "type": "cloud", "label": "OpenAI-compatible model", "sublabel": "planning + structured generation", "pos": [1130, 200], "size": [190, 70]},
+    {"id": "card-service", "type": "backend", "label": "Typed card service", "sublabel": "filtering, paging, deduplication", "pos": [1130, 600], "size": [185, 70]},
+    {"id": "card-api", "type": "external", "label": "MagicTheGathering.io", "sublabel": "verified TLS card API", "pos": [1370, 600], "size": [180, 70]},
+    {"id": "rules-pdf", "type": "external", "label": "Comprehensive Rules PDF", "sublabel": "local source document", "pos": [60, 80], "size": [190, 70]},
+    {"id": "ingestion", "type": "backend", "label": "Parser + chunker", "sublabel": "structured semantic rules", "pos": [300, 80], "size": [175, 70]},
+    {"id": "persisted-index", "type": "database", "label": "Persisted retrieval index", "sublabel": "chunks + normalized E5 matrix", "pos": [525, 80], "size": [200, 72]},
+    {"id": "hybrid", "type": "backend", "label": "Hybrid retrieval", "sublabel": "exact + BM25 + E5 + RRF", "pos": [770, 80], "size": [180, 70]},
+    {"id": "rule-evidence", "type": "database", "label": "RuleEvidence", "sublabel": "rules, pages, version, methods", "pos": [880, 180], "size": [180, 70]}
+  ],
+  "boundaries": [
+    {"kind": "region", "label": "LangGraph StateGraph — explicit single-agent orchestration", "wraps": ["planner", "rules-node", "card-search", "resolve-cards", "custom-card", "generation", "validation", "render"], "pad": 34},
+    {"kind": "region", "label": "Local rules knowledge pipeline", "wraps": ["rules-pdf", "ingestion", "persisted-index", "hybrid", "rule-evidence"], "pad": 30}
+  ],
+  "connections": [
+    {"from": "streamlit", "to": "fastapi", "variant": "emphasis"},
+    {"from": "fastapi", "to": "runtime", "variant": "emphasis"},
+    {"from": "runtime", "to": "planner", "variant": "emphasis"},
+    {"from": "runtime", "to": "memory", "fromSide": "bottom", "toSide": "top", "variant": "dashed"},
+    {"from": "planner", "to": "rules-node", "variant": "emphasis"},
+    {"from": "planner", "to": "card-search", "variant": "dashed"},
+    {"from": "planner", "to": "resolve-cards", "variant": "dashed"},
+    {"from": "planner", "to": "custom-card", "variant": "dashed"},
+    {"from": "rules-pdf", "to": "ingestion", "variant": "emphasis"},
+    {"from": "ingestion", "to": "persisted-index", "variant": "emphasis"},
+    {"from": "persisted-index", "to": "hybrid", "variant": "emphasis"},
+    {"from": "hybrid", "to": "rule-evidence", "fromSide": "bottom", "toSide": "top", "variant": "emphasis"},
+    {"from": "rule-evidence", "to": "rules-node", "fromSide": "bottom", "toSide": "top", "variant": "emphasis"},
+    {"from": "rules-node", "to": "generation", "variant": "emphasis"},
+    {"from": "card-search", "to": "card-service", "variant": "default"},
+    {"from": "resolve-cards", "to": "card-service", "variant": "default"},
+    {"from": "card-service", "to": "card-api", "variant": "security"},
+    {"from": "resolve-cards", "to": "generation", "variant": "emphasis"},
+    {"from": "custom-card", "to": "generation", "variant": "dashed"},
+    {"from": "chat-model", "to": "generation", "fromSide": "bottom", "toSide": "top", "variant": "dashed"},
+    {"from": "generation", "to": "validation", "variant": "security"},
+    {"from": "validation", "to": "render", "variant": "security"}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "Deterministic boundaries", "items": ["Rules and card data are resolved before generation", "Source IDs are validated before rendering", "Card search rendering does not ask the LLM to rewrite facts"]},
+    {"dot": "violet", "title": "One explicit graph", "items": ["Known intents route to inspectable nodes", "Grounded retries are bounded to two attempts", "Custom cards remain separate from official Card objects"]},
+    {"dot": "emerald", "title": "Conversation", "items": ["thread_id selects the LangGraph checkpoint", "Only messages persist between turns", "Demo memory is in-process"]}
+  ]
+}

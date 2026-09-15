@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Private Clinic Clinical Assistant — Proposed Architecture",
+    "subtitle": "Local clinical decision support with optional non-sensitive cloud operations",
+    "output": "clinic-solution-architecture.html",
+    "animation": "trace",
+    "visual_preset": "blueprint",
+    "quality_profile": "standard",
+    "viewBox": [2100, 1280],
+    "views": [
+      {"id": "doctor-flow", "label": "Doctor question flow", "focus": ["doctor", "auth", "backend", "retrieval", "patient-adapter", "calculation", "local-llm", "validation", "answer"], "note": "Authorization precedes retrieval, optional patient context and local explanation."},
+      {"id": "knowledge", "label": "Clinical knowledge", "focus": ["protocols", "ingestion", "pgvector", "dosage", "images", "retrieval"], "note": "Approved protocols, tables and images retain local provenance."},
+      {"id": "ecg", "label": "ECG pre-assessment", "focus": ["ecg-data", "patient-adapter", "ecg-service", "ecg-result", "local-llm", "answer"], "note": "Specialized local ML returns structured decision-support findings for clinician review."}
+    ]
+  },
+  "components": [
+    {"id": "doctor", "type": "external", "label": "Doctor", "sublabel": "internal browser UI", "pos": [40, 420], "size": [150, 68]},
+    {"id": "auth", "type": "security", "label": "Authentication + RBAC", "sublabel": "patient authorization at data layer", "pos": [240, 420], "size": [190, 70]},
+    {"id": "backend", "type": "backend", "label": "Clinical assistant backend", "sublabel": "local orchestration", "pos": [490, 420], "size": [190, 70]},
+
+    {"id": "protocols", "type": "external", "label": "Clinical protocol PDFs", "sublabel": "~80 · versioned · approved/superseded", "pos": [490, 70], "size": [210, 72]},
+    {"id": "ingestion", "type": "backend", "label": "Local ingestion + indexing", "sublabel": "controlled update workflow", "pos": [760, 70], "size": [200, 70]},
+    {"id": "pgvector", "type": "database", "label": "PostgreSQL + pgvector", "sublabel": "local embeddings + source metadata", "pos": [1030, 70], "size": [210, 72]},
+    {"id": "dosage", "type": "database", "label": "Dosage catalog", "sublabel": "validated rules, units, constraints, version", "pos": [1030, 190], "size": [220, 72]},
+    {"id": "images", "type": "database", "label": "Extracted images + OCR", "sublabel": "document, section, page", "pos": [760, 190], "size": [200, 70]},
+    {"id": "retrieval", "type": "backend", "label": "Protocol retrieval", "sublabel": "approved versions only", "pos": [790, 350], "size": [180, 68]},
+
+    {"id": "mysql", "type": "database", "label": "MySQL", "sublabel": "sensitive patient data", "pos": [500, 650], "size": [160, 66]},
+    {"id": "word", "type": "database", "label": "Word patient records", "sublabel": "local documents", "pos": [500, 760], "size": [180, 66]},
+    {"id": "ecg-data", "type": "database", "label": "ECG waveform data", "sublabel": "raw / structured preferred", "pos": [500, 870], "size": [180, 68]},
+    {"id": "patient-adapter", "type": "security", "label": "Authorized patient context", "sublabel": "read-only · on-demand · minimized", "pos": [780, 550], "size": [200, 72]},
+
+    {"id": "calculation", "type": "backend", "label": "Deterministic calculations", "sublabel": "units, ranges, limits, rounding", "pos": [1080, 620], "size": [210, 72]},
+    {"id": "ecg-service", "type": "backend", "label": "ECG Pre-assessment Service", "sublabel": "specialized local clinical ML", "pos": [1080, 800], "size": [210, 72]},
+    {"id": "ecg-result", "type": "database", "label": "Structured ECG result", "sublabel": "findings · urgency · input quality", "pos": [1330, 800], "size": [200, 72]},
+    {"id": "local-llm", "type": "backend", "label": "Local open-weight LLM", "sublabel": "local inference and explanation", "pos": [1300, 400], "size": [200, 72]},
+    {"id": "validation", "type": "security", "label": "Source + citation validation", "sublabel": "metadata, version and page", "pos": [1540, 400], "size": [200, 72]},
+    {"id": "answer", "type": "frontend", "label": "Grounded answer", "sublabel": "citations · calculations · ECG explanation", "pos": [1780, 400], "size": [160, 76], "tag": "clinician review"},
+
+    {"id": "repo-ci", "type": "cloud", "label": "Source repository + CI", "sublabel": "code and tests only", "pos": [1130, 1020], "size": [190, 68]},
+    {"id": "updates", "type": "cloud", "label": "Signed updates", "sublabel": "approved software artifacts", "pos": [1390, 1020], "size": [180, 68]},
+    {"id": "monitoring", "type": "cloud", "label": "Infrastructure monitoring", "sublabel": "non-sensitive signals only", "pos": [1640, 1020], "size": [200, 68]}
+  ],
+  "boundaries": [
+    {"kind": "region", "label": "LOCAL / CLINIC TRUST BOUNDARY — NO PATIENT OR CLINICAL DATA LEAVES", "wraps": ["doctor", "auth", "backend", "protocols", "ingestion", "pgvector", "dosage", "images", "retrieval", "mysql", "word", "ecg-data", "patient-adapter", "calculation", "ecg-service", "ecg-result", "local-llm", "validation", "answer"], "pad": 38},
+    {"kind": "region", "label": "OPTIONAL CLOUD — NO SENSITIVE DATA", "wraps": ["repo-ci", "updates", "monitoring"], "pad": 28}
+  ],
+  "connections": [
+    {"from": "doctor", "to": "auth", "variant": "emphasis"},
+    {"from": "auth", "to": "backend", "variant": "security"},
+    {"from": "backend", "to": "retrieval", "variant": "emphasis"},
+    {"from": "protocols", "to": "ingestion", "variant": "emphasis"},
+    {"from": "ingestion", "to": "pgvector", "variant": "emphasis"},
+    {"from": "ingestion", "to": "dosage", "variant": "security"},
+    {"from": "ingestion", "to": "images", "variant": "default"},
+    {"from": "pgvector", "to": "retrieval", "variant": "emphasis"},
+    {"from": "images", "to": "retrieval", "fromSide": "bottom", "toSide": "top", "variant": "default"},
+    {"from": "mysql", "to": "patient-adapter", "variant": "security"},
+    {"from": "word", "to": "patient-adapter", "variant": "security"},
+    {"from": "ecg-data", "to": "patient-adapter", "variant": "security"},
+    {"from": "backend", "to": "patient-adapter", "variant": "dashed"},
+    {"from": "dosage", "to": "calculation", "fromSide": "bottom", "toSide": "top", "variant": "security"},
+    {"from": "patient-adapter", "to": "calculation", "variant": "security"},
+    {"from": "patient-adapter", "to": "ecg-service", "variant": "security"},
+    {"from": "ecg-service", "to": "ecg-result", "variant": "security"},
+    {"from": "retrieval", "to": "local-llm", "variant": "emphasis"},
+    {"from": "patient-adapter", "to": "local-llm", "variant": "security"},
+    {"from": "calculation", "to": "local-llm", "variant": "emphasis"},
+    {"from": "ecg-result", "to": "local-llm", "fromSide": "top", "toSide": "bottom", "variant": "emphasis"},
+    {"from": "local-llm", "to": "validation", "variant": "security"},
+    {"from": "validation", "to": "answer", "variant": "security"}
+  ],
+  "cards": [
+    {"dot": "rose", "title": "Data residency", "items": ["Patient records, protocols, embeddings and inference remain local", "Patient context is fetched only after authorization", "Cloud receives no patient or clinical content"]},
+    {"dot": "emerald", "title": "Clinical controls", "items": ["Protocol version and page are visible", "Dosage arithmetic is deterministic and tested", "ECG output is pre-assessment requiring clinician review"]},
+    {"dot": "cyan", "title": "Operational fit", "items": ["One local base LLM, not one model per specialty", "PostgreSQL + pgvector avoids another specialist database", "Simple browser UI and local deployment suit one administrator"]}
+  ]
+}

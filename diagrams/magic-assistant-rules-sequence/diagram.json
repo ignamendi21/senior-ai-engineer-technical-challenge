@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Rules Question — ¿Cuántas fases tiene un turno?",
+    "subtitle": "Deterministic retrieval and validation around one structured LLM generation",
+    "output": "magic-assistant-rules-sequence.html",
+    "viewBox": [1600, 980],
+    "column_fit": "spread",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "views": [
+      {"id": "request", "label": "Request and plan", "focus": ["user", "streamlit", "fastapi", "runtime", "planner"], "note": "The model classifies the request but does not answer yet."},
+      {"id": "grounding", "label": "Retrieve and ground", "focus": ["runtime", "retriever", "evidence", "generator"], "note": "Rule 500.1 is deterministic evidence supplied to generation."},
+      {"id": "validation", "label": "Validate and render", "focus": ["generator", "validator", "renderer", "fastapi", "streamlit", "user"], "note": "Code validates selected IDs and renders source metadata."}
+    ]
+  },
+  "participants": [
+    {"id": "user", "type": "external", "label": "User", "sublabel": "player"},
+    {"id": "streamlit", "type": "frontend", "label": "Streamlit", "sublabel": "thread_id"},
+    {"id": "fastapi", "type": "backend", "label": "FastAPI", "sublabel": "/api/chat"},
+    {"id": "runtime", "type": "backend", "label": "Runtime", "sublabel": "shared graph"},
+    {"id": "planner", "type": "cloud", "label": "plan_request", "sublabel": "structured LLM"},
+    {"id": "retriever", "type": "backend", "label": "Hybrid retriever", "sublabel": "exact + BM25 + E5 + RRF"},
+    {"id": "evidence", "type": "database", "label": "RuleEvidence", "sublabel": "rule 500.1"},
+    {"id": "generator", "type": "cloud", "label": "synthesize", "sublabel": "grounded LLM"},
+    {"id": "validator", "type": "security", "label": "validate_sources", "sublabel": "deterministic allowlist"},
+    {"id": "renderer", "type": "backend", "label": "render response", "sublabel": "answer + citations"}
+  ],
+  "segments": [
+    {"from": 160, "to": 336, "label": "Plan"},
+    {"from": 350, "to": 566, "label": "Retrieve + generate"},
+    {"from": 580, "to": 846, "label": "Validate + return"}
+  ],
+  "messages": [
+    {"from": "user", "to": "streamlit", "y": 184, "label": "¿Cuántas fases tiene un turno?", "variant": "default"},
+    {"from": "streamlit", "to": "fastapi", "y": 224, "label": "POST /api/chat + thread_id", "variant": "emphasis"},
+    {"from": "fastapi", "to": "runtime", "y": 264, "label": "invoke(message, thread_id)", "variant": "emphasis"},
+    {"from": "runtime", "to": "planner", "y": 304, "label": "plan_request(messages)", "variant": "default", "note": "LLM classifies and extracts only."},
+    {"from": "planner", "to": "runtime", "y": 344, "label": "RequestPlan: rules_question", "variant": "return"},
+    {"from": "runtime", "to": "retriever", "y": 384, "label": "retrieve_rules: phases of a turn", "variant": "emphasis"},
+    {"from": "retriever", "to": "evidence", "y": 424, "label": "rank deterministic matches", "variant": "emphasis"},
+    {"from": "evidence", "to": "runtime", "y": 464, "label": "RuleEvidence: 500.1 + page + version", "variant": "return", "note": "Retrieved evidence is deterministic."},
+    {"from": "runtime", "to": "generator", "y": 514, "label": "synthesize_grounded_answer(evidence)", "variant": "default", "note": "LLM explains only supplied evidence."},
+    {"from": "generator", "to": "runtime", "y": 554, "label": "GroundedAnswerDraft + RuleSourceRef", "variant": "return"},
+    {"from": "runtime", "to": "validator", "y": 604, "label": "validate chunk_id and rule_id", "variant": "security"},
+    {"from": "validator", "to": "runtime", "y": 644, "label": "valid source allowlist", "variant": "return", "note": "Invalid IDs retry once, then safe fallback."},
+    {"from": "runtime", "to": "renderer", "y": 694, "label": "render answer + rule 500.1 citation", "variant": "security"},
+    {"from": "renderer", "to": "fastapi", "y": 734, "label": "ChatResponse", "variant": "return"},
+    {"from": "fastapi", "to": "streamlit", "y": 774, "label": "200 answer + structured sources", "variant": "return"},
+    {"from": "streamlit", "to": "user", "y": 814, "label": "display answer and source once", "variant": "return"}
+  ],
+  "activations": [
+    {"participant": "fastapi", "from": 218, "to": 782, "type": "backend"},
+    {"participant": "runtime", "from": 258, "to": 702, "type": "backend"},
+    {"participant": "retriever", "from": 378, "to": 470, "type": "backend"},
+    {"participant": "generator", "from": 508, "to": 560, "type": "cloud"},
+    {"participant": "validator", "from": 598, "to": 650, "type": "security"}
+  ],
+  "cards": [
+    {"dot": "emerald", "title": "Deterministic", "items": ["Hybrid retrieval returns rule 500.1 with provenance", "Source IDs are validated against retrieved evidence", "Citation text and page are rendered by code"]},
+    {"dot": "violet", "title": "LLM", "items": ["Planning produces a typed RequestPlan", "Generation receives only structured evidence", "The LLM never formats its own citations"]},
+    {"dot": "amber", "title": "Bounded behavior", "items": ["At most two synthesis attempts", "Insufficient or invalid grounding returns a safe fallback", "thread_id keeps conversation context isolated"]}
+  ]
+}
