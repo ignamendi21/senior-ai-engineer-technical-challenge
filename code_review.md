@@ -42,7 +42,7 @@ If the key shown in the original were ever real, the first operational action wo
 
 ### Retrieved data promoted to system instructions — Critical
 
-**Problem:** `"Responde usando: " + context` places arbitrary retrieved text in the system message.
+**Problem:** `"Responde usando: " + context` places arbitrary retrieved text in the system message. Retrieved documents are joined with one space, losing source boundaries; an empty collection yields a misleading system instruction with no reference material.
 
 **Risk:** A document containing “ignore previous instructions,” data-exfiltration requests, or misleading policy is elevated into the most trusted prompt channel. Retrieval is a trust boundary: indexed content is data, not policy.
 
@@ -56,7 +56,7 @@ If the key shown in the original were ever real, the first operational action wo
 
 **Problem:** Every call mutates a caller-owned list and overwrites one global `history.json` without a context manager, encoding, locking, atomic replacement or session identity.
 
-**Risk:** Concurrent writes can corrupt the file; users can read each other's conversations; data grows indefinitely; sensitive content has no retention/deletion policy; a crash can leave a partial file.
+**Risk:** Concurrent writes can corrupt the file; users can read each other's conversations; data grows indefinitely; sensitive content has no retention/deletion policy; a crash can leave a partial file. The file is never read back, so this is effectively a write-only debug snapshot rather than recoverable session persistence.
 
 **Recommendation:** Scope history by session and bound retained turns. Do not persist by default in this small helper.
 
@@ -70,11 +70,11 @@ If the key shown in the original were ever real, the first operational action wo
 
 **Recommendation:** Use an injected current `OpenAI` client and select `RAG_CHAT_MODEL` and `RAG_EMBEDDING_MODEL` through configuration. Configure timeout and bounded SDK retries at client creation.
 
-**Improved implementation:** `OpenAIEmbeddingProvider` uses `client.embeddings.create`; `OpenAIChatProvider` uses the Responses structured parse API. Provider protocols keep all tests offline.
+**Improved implementation:** `OpenAIEmbeddingProvider` uses `client.embeddings.create`; `OpenAIChatProvider` uses the Responses structured parse API. Provider protocols keep all tests offline. The original also blindly indexes `choices[0]` without checking whether choices/content exist or whether generation was truncated or filtered; structured parsing and explicit missing-output errors replace that assumption.
 
 ### Import-time global side effects and collection lifecycle — High
 
-**Problem:** Importing the module creates clients and a collection. `create_collection("docs")` can fail on a second run and the default client is in-memory.
+**Problem:** Importing the module creates clients and a collection. Reloading/re-executing it in the same interpreter can make `create_collection("docs")` fail because the collection already exists; a new process instead starts with a fresh, empty default in-memory client. There is no entry-point guard, and the credential, client and collection are global mutable module state.
 
 **Risk:** Data vanishes on restart, imports become environment-dependent, tests interfere, and re-deployment/re-import behavior is undefined.
 
@@ -88,7 +88,7 @@ If the key shown in the original were ever real, the first operational action wo
 
 **Risk:** Changing a model while reusing a collection can produce equal-dimensional but semantically incompatible vectors. Persistence alone does not make an index valid.
 
-**Recommendation:** Store embedding model and index schema metadata and fail clearly on mismatch. In a larger system, include corpus/version fingerprints and rebuild workflows.
+**Recommendation:** Store embedding model, index schema and chunking configuration metadata and fail clearly on mismatch. In a larger system, include corpus/version fingerprints and rebuild workflows.
 
 ### Weak IDs and undefined re-ingestion — High
 
